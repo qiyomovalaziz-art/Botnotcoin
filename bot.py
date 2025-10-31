@@ -9,11 +9,12 @@ import random
 from datetime import date
 
 # ====== CONFIG ======
-TOKEN = os.environ.get("BOT_TOKEN")  # Railway Variables ga qo'y
-WEBAPP_URL = os.environ.get("WEBAPP_URL")  # misol: https://botnotcoin-production.up.railway.app
+TOKEN = os.environ.get("BOT_TOKEN")   # set this in Railway Variables
+WEBAPP_URL = os.environ.get("WEBAPP_URL")  # set this to your Railway domain, e.g. https://your-app.up.railway.app
 
+# Game settings (o'zgartirish mumkin)
 MAX_ENERGY = 10
-ENERGY_REGEN_SECONDS = 60 * 5
+ENERGY_REGEN_SECONDS = 60 * 5   # 1 energia 5 daqiqada tiklanadi
 DAILY_BONUS_COINS = 50
 REFERRAL_REWARD_REFERRER = 50
 REFERRAL_REWARD_NEW = 20
@@ -26,7 +27,7 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ====== DATABASE ======
+# ====== DATABASE (SQLite) ======
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -67,6 +68,7 @@ def get_user(user_id):
     }
 
 def regen_energy_for_user(user):
+    """Return updated energy after regeneration calculation (and persist new value if gained)."""
     now = int(time.time())
     last = user['last_energy_ts'] or now
     energy = user['energy']
@@ -85,6 +87,7 @@ def regen_energy_for_user(user):
 # ====== TELEGRAM HANDLERS ======
 @bot.message_handler(commands=['start'])
 def handle_start(message):
+    # /start or /start <referrer_id>
     args = message.text.split()
     user_id = message.from_user.id
     invited_by = None
@@ -96,6 +99,7 @@ def handle_start(message):
 
     ensure_user(user_id, invited_by)
 
+    # reward referral if new
     if invited_by and invited_by != user_id:
         ensure_user(invited_by)
         u = get_user(user_id)
@@ -105,7 +109,7 @@ def handle_start(message):
             conn.commit()
             try:
                 bot.send_message(invited_by, f"🎉 Sizga yangi referal qo‘shildi! +{REFERRAL_REWARD_REFERRER} 🪙")
-            except:
+            except Exception:
                 pass
 
     web_url = WEBAPP_URL or ""
@@ -142,7 +146,7 @@ def handle_callback(call):
         text = f"👤 Profil\n\n🪙 Coin: {user['coins']}\n⚡ Energiya: {user['energy']}/{MAX_ENERGY}\n"
         bot.send_message(call.message.chat.id, text)
 
-# ====== FLASK WEB ROUTES ======
+# ====== FLASK ROUTES (webapp API) ======
 @app.route('/')
 def index():
     return send_from_directory('web', 'index.html')
@@ -159,15 +163,17 @@ def add_coin():
         return jsonify({"error": "user_id required"}), 400
     ensure_user(user_id)
     user = get_user(user_id)
-    current_energy = regen_energy_for_user(user)
+    regen_energy_for_user(user)
     user = get_user(user_id)
     if user['energy'] <= 0:
         return jsonify({"error": "no_energy", "message": "Sizda energiya yo'q."}), 403
 
+    # consume 1 energy
     new_energy = user['energy'] - 1
     cursor.execute("UPDATE users SET energy = ?, last_energy_ts = ? WHERE user_id = ?", (new_energy, int(time.time()), user_id))
     conn.commit()
 
+    # random reward
     added = random.randint(MIN_CLICK_REWARD, MAX_CLICK_REWARD)
     cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (added, user_id))
     conn.commit()
@@ -176,6 +182,21 @@ def add_coin():
     row = cursor.fetchone()
     coins, energy = row
     return jsonify({"coins": coins, "added": added, "energy": energy})
+
+@app.route('/profile/<int:uid>', methods=['GET'])
+def api_profile(uid):
+    user = get_user(uid)
+    if not user:
+        return jsonify({"error": "not_found"}), 404
+    regen_energy_for_user(user)
+    user = get_user(uid)
+    return jsonify({
+        "user_id": user['user_id'],
+        "coins": user['coins'],
+        "energy": user['energy'],
+        "invited_by": user['invited_by'],
+        "last_daily": user['last_daily']
+    })
 
 @app.route('/daily_claim', methods=['POST'])
 def daily_claim():
@@ -201,7 +222,7 @@ def api_leaderboard():
     result = [{"rank": i+1, "user_id": r[0], "coins": r[1]} for i, r in enumerate(rows)]
     return jsonify(result)
 
-# ====== RUN ======
+# ====== RUN BOT + FLASK ======
 def run_bot_polling():
     bot.infinity_polling()
 
