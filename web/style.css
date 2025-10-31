@@ -1,8 +1,8 @@
 body {
-  background: linear-gradient(145deg, #111, #222);
+  background: radial-gradient(circle at center, #111 0%, #000 100%);
   color: #fff;
+  font-family: 'Arial', sans-serif;
   text-align: center;
-  font-family: sans-serif;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -10,16 +10,37 @@ body {
   align-items: center;
 }
 
+h1 {
+  font-size: 2em;
+  margin-bottom: 30px;
+}
+
 button {
   background: gold;
   border: none;
-  border-radius: 15px;
-  padding: 20px 40px;
-  font-size: 22px;
+  border-radius: 20px;
+  padding: 20px 60px;
+  font-size: 26px;
+  font-weight: bold;
+  color: #000;
   cursor: pointer;
-  transition: transform 0.1s;
+  transition: transform 0.1s ease;
 }
 
 button:active {
-  transform: scale(0.95);
+  transform: scale(0.9);
+}
+
+.coin-fly {
+  position: fixed;
+  bottom: 150px;
+  font-size: 28px;
+  color: gold;
+  font-weight: bold;
+  animation: flyUp 1s ease-out forwards;
+}
+
+@keyframes flyUp {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-120px); }
 }
