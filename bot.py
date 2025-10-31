@@ -248,8 +248,5 @@ def api_leaderboard():
 def run_bot_polling():
     bot.infinity_polling()
 
-if __name__ == "__main__":
-    t = threading.Thread(target=run_bot_polling, daemon=True)
-    t.start()
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
