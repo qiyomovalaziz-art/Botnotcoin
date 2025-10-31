@@ -1,38 +1,23 @@
-body {
-  background: linear-gradient(145deg, #0f0f0f, #1a1a1a);
-  color: #fff;
-  text-align: center;
-  font-family: 'Poppins', sans-serif;
-  margin: 0;
-  padding: 0;
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+/* style.css */
+:root {
+  --bg1: #0f0f0f;
+  --bg2: #1a1a1a;
+  --gold: #ffd700;
+  --accent: #ffeb8a;
 }
+* { box-sizing: border-box; }
+html,body { height:100%; margin:0; padding:0; font-family: Inter, system-ui, Arial; background: radial-gradient(circle at center, var(--bg1), #000); color:#fff; }
+.main { max-width:420px; margin:0 auto; height:100vh; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding:30px 20px; }
+.header { width:100%; display:flex; justify-content:space-between; align-items:center; }
+.title { font-size:28px; font-weight:700; }
+.energy { opacity:0.9; }
+.center { flex:1; display:flex; align-items:center; justify-content:center; width:100%; }
+.big-btn { background:var(--gold); color:#000; border:none; padding:28px 48px; border-radius:20px; font-size:28px; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,0.6); cursor:pointer; transition:transform .08s; }
+.big-btn:active { transform:scale(.96); }
+.footer { width:100%; display:flex; gap:10px; justify-content:space-between; }
+.small { background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.08); padding:10px 12px; border-radius:10px; cursor:pointer; font-size:14px; }
 
-.container {
-  text-align: center;
+.fly {
+  position:fixed; left:50%; top:55%; transform:translateX(-50%); color:var(--gold); font-weight:800; font-size:26px; animation:fly 0.9s ease forwards;
 }
-
-h1 {
-  font-size: 28px;
-  margin-bottom: 40px;
-}
-
-button {
-  background: gold;
-  border: none;
-  border-radius: 20px;
-  padding: 20px 60px;
-  font-size: 24px;
-  font-weight: bold;
-  cursor: pointer;
-  color: black;
-  box-shadow: 0 0 20px gold;
-}
-
-button:active {
-  transform: scale(0.95);
-  box-shadow: 0 0 10px yellow;
-}
+@keyframes fly { 0% { opacity:1; transform:translate(-50%,0) scale(1); } 100% { opacity:0; transform:translate(-50%,-130px) scale(1.1); } }
