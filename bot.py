@@ -3,7 +3,7 @@ import telebot
 import sqlite3
 import os
 
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = ("7589550087:AAERu7icdx5z9Ye_hfM7-FwNwgtJVja0R_M")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
