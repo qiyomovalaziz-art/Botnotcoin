@@ -1,5 +1,5 @@
 const tg = window.Telegram.WebApp;
-tg.expand();
+tg.expand(); // Mini ilovani to‘liq ekranda ochadi
 
 let user = tg.initDataUnsafe?.user;
 let user_id = user?.id;
@@ -16,5 +16,6 @@ tapButton.addEventListener("click", () => {
   .then(res => res.json())
   .then(data => {
     coinDisplay.textContent = data.coins;
-  });
+  })
+  .catch(err => console.error("Xato:", err));
 });
