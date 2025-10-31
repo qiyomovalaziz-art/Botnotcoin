@@ -1,28 +1,48 @@
+from flask import Flask, request, send_from_directory
 import telebot
-from telebot import types
+import sqlite3
+import os
 
-TOKEN = "7589550087:AAERu7icdx5z9Ye_hfM7-FwNwgtJVja0R_M"  # bu joyga o'z tokeningni yoz
+TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-# Har bir user uchun coin saqlanadi
-user_data = {}
+# Baza
+conn = sqlite3.connect("database.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, coins INTEGER DEFAULT 0)")
+conn.commit()
 
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    user_data[user_id] = 0
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn = types.KeyboardButton("💰 Coin yig‘ish")
+    cursor.execute("INSERT OR IGNORE INTO users (user_id, coins) VALUES (?, ?)", (user_id, 0))
+    conn.commit()
+
+    webapp_url = "https://sening-domaining.railway.app/"  # Mini app URL
+    markup = telebot.types.InlineKeyboardMarkup()
+    btn = telebot.types.InlineKeyboardButton("🎮 O‘yinni boshlash", web_app=telebot.types.WebAppInfo(webapp_url))
     markup.add(btn)
-    bot.send_message(message.chat.id, "Salom! Bosib coin yig‘ing 💸", reply_markup=markup)
+    bot.send_message(message.chat.id, "Salom! Boshlaymizmi?", reply_markup=markup)
 
-@bot.message_handler(func=lambda message: True)
-def handle_click(message):
-    user_id = message.from_user.id
-    if message.text == "💰 Coin yig‘ish":
-        user_data[user_id] += 1
-        bot.send_message(message.chat.id, f"Sizda {user_data[user_id]} ta coin bor! 💰")
-    else:
-        bot.send_message(message.chat.id, "💬 Tugmani bosing coin olish uchun!")
+# Flask server (web interface)
+@app.route('/')
+def index():
+    return send_from_directory('web', 'index.html')
 
-bot.infinity_polling()
+@app.route('/<path:path>')
+def send_file(path):
+    return send_from_directory('web', path)
+
+# Foydalanuvchi coin qo‘shadi
+@app.route('/add_coin', methods=['POST'])
+def add_coin():
+    data = request.json
+    user_id = data.get("user_id")
+    cursor.execute("UPDATE users SET coins = coins + 1 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+    return {"coins": cursor.fetchone()[0]}
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
