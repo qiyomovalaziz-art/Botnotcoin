@@ -1,7 +1,7 @@
 import telebot
 from telebot import types
 
-TOKEN = "BOT_TOKEN_BU_YERGA_YOZ"  # bu joyga o'z tokeningni yoz
+TOKEN = "7589550087:AAERu7icdx5z9Ye_hfM7-FwNwgtJVja0R_M"  # bu joyga o'z tokeningni yoz
 bot = telebot.TeleBot(TOKEN)
 
 # Har bir user uchun coin saqlanadi
