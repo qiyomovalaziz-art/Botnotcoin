@@ -3,7 +3,13 @@ body {
   color: #fff;
   text-align: center;
   font-family: sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
+
 button {
   background: gold;
   border: none;
@@ -11,4 +17,9 @@ button {
   padding: 20px 40px;
   font-size: 22px;
   cursor: pointer;
+  transition: transform 0.1s;
+}
+
+button:active {
+  transform: scale(0.95);
 }
