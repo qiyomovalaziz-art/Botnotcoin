@@ -53,9 +53,6 @@ def write_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# Bot init
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
 
 # --- Utility functions for persistent storage ---
 
@@ -78,7 +75,13 @@ def get_settings() -> Dict[str, Any]:
     return read_json(SETTINGS_FILE)
 
 def save_settings(d: Dict[str, Any]):
-    write_json(SETTINGS_FILE, d)
+    from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+    )write_json(SETTINGS_FILE, d)
 
 def get_services() -> List[Dict[str, Any]]:
     return read_json(SERVICES_FILE)
