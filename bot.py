@@ -504,16 +504,27 @@ async def cb_confirm_order(cq: CallbackQuery):
 
 # /order command
 @dp.message(Command("order"))
-async def cmd_order_info(message: Message):
+async def cmd_order_info(message: types.Message):
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("Foydalanish: /order <buyurtma_id>")
+        await message.answer("❗ Buyurtma ID raqamini kiriting.\nMisol: /order 12345")
         return
+
     order_id = parts[1].strip()
     orders = get_orders()
+
     if order_id not in orders:
-        await message.answer("Buyurtma topilmadi.")
+        await message.answer("❌ Bunday ID bilan buyurtma topilmadi.")
         return
+
     ord = orders[order_id]
-    text = (f"Buyurtma: {order_id}\nXizmat: {ord.get('service_id')}\nLink: {ord.get('link')}\n"
-        
+    text = (
+        f"🧾 Buyurtma ID: {order_id}\n"
+        f"📦 Xizmat ID: {ord.get('service_id')}\n"
+        f"🔗 Link: {ord.get('link')}\n"
+        f"📊 Miqdor: {ord.get('quantity')}\n"
+        f"💰 Narx: {ord.get('price')} so'm\n"
+        f"📅 Holat: {ord.get('status')}"
+    )
+
+    await message.answer(text)
