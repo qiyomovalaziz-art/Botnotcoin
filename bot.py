@@ -1,4 +1,3 @@
-# bot_all.py
 import asyncio
 import json
 import os
@@ -10,11 +9,12 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.client.default import DefaultBotProperties
 
 # ========== CONFIG ==========
 BOT_TOKEN = "8295341226:AAGfbow1rcM6gAJSO-2XnlTKN0Dk0brg4AE"   # <-- o'zgartiring
 ADMIN_ID = 7973934849           # <-- o'zgartiring (Sizning Telegram ID)
-ADMIN_PASS = "1234"            # oddiy admin parol (xohlasangiz o'zgartiring)
+ADMIN_PASS = "1234"             # oddiy admin parol (xohlasangiz o'zgartiring)
 DATA_DIR = "data"
 # ========== END CONFIG ==========
 
@@ -75,13 +75,9 @@ def get_settings() -> Dict[str, Any]:
     return read_json(SETTINGS_FILE)
 
 def save_settings(d: Dict[str, Any]):
-    from aiogram import Bot
-from aiogram.client.default import DefaultBotProperties
-
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-    )write_json(SETTINGS_FILE, d)
+    # Agar kerak bo‘lsa, bu yerda Bot obyektini yaratishingiz mumkin
+    # bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    write_json(SETTINGS_FILE, d)
 
 def get_services() -> List[Dict[str, Any]]:
     return read_json(SERVICES_FILE)
@@ -114,6 +110,11 @@ def save_withdraws(w: Dict[str, Any]):
     write_json(WITHDRAWS_FILE, w)
 
 # --- Sub check ---
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+
 async def check_subs(user_id: int) -> bool:
     channels = get_channels()
     if not channels:
