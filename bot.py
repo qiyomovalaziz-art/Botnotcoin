@@ -507,7 +507,7 @@ async def cb_confirm_order(cq: CallbackQuery):
 async def cmd_order_info(message: types.Message):
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("❗ Buyurtma ID raqamini kiriting.\nMisol: /order 12345")
+        await message.answer("❗ Buyurtma ID raqamini kiriting.\nMasalan: /order 12345")
         return
 
     order_id = parts[1].strip()
