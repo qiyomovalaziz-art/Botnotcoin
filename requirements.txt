@@ -1,2 +1,1 @@
-flask
-pyTelegramBotAPI
+pip install aiogram aiohttp
