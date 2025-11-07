@@ -12,7 +12,7 @@ from aiogram.types import (
 
 # 🔹 Token va admin ID
 BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"   # <-- faqat shu joyni to‘ldirasan
-ADMIN_ID = 123456789                     # <-- o‘zingning Telegram ID’ing
+ADMIN_ID = 7973934849                     # <-- o‘zingning Telegram ID’ing
 
 # 🔹 Fayl nomi (kanallar saqlanadigan)
 CHANNELS_FILE = "channels.json"
