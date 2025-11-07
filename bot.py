@@ -15,7 +15,7 @@ from aiogram.types import (
 )
 
 # ---------------- CONFIG ----------------
-TOKEN = ""   # token joyiga o'zingnikini qo'y
+TOKEN = "8379130776:AAFbPEBwI8Qr9T-lm7YaR98k8bXWcu2wn9g"   # token joyiga o'zingnikini qo'y
 ADMIN_ID = 7973934849           # admin ID
 DATA_DIR = "data"
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
