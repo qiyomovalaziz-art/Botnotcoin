@@ -1,1 +1,5 @@
-aiogram==3.14.0
+aiogram==3.4.1
+python-dotenv
+aiohttp
+asyncio
+requests
