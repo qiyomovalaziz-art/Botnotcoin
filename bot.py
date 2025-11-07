@@ -15,7 +15,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 DATA_FILE = "data.json"
 BOT_TOKEN = ("8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM")  # yoki to'g'ridan-to'g'ri yozing (xavfsizlik uchun env tavsiya)
-ADMIN_ID = ("7973934849", "0"))  # admin telegram id sini o'rnating
+ADMIN_ID = 7973934849
 
 if BOT_TOKEN is None or ADMIN_ID == 0:
     raise SystemExit("Iltimos, TG_BOT_TOKEN va ADMIN_ID muhit o'zgaruvchilarini sozlang.")
