@@ -6,8 +6,8 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # 🔹 Token va admin ID
-BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # Token shu yerga
-ADMIN_ID = 123456789  # Admin ID shu yerga
+BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # <--- Faqat shu joyni to‘ldirasan
+ADMIN_ID = 7973934849  # <--- O‘zingning Telegram ID’ing (myidbot orqali bilasan)
 
 # 🔹 Log
 logging.basicConfig(level=logging.INFO)
@@ -15,24 +15,31 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# 🔹 Kanal ma’lumoti
+CHANNEL_USERNAME = "@CuruptoUZ"
+CHANNEL_LINK = "https://t.me/CuruptoUZ"
+
+
 # 🔹 Start buyrug‘i
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Kanalga obuna bo‘lish", url="https://t.me/yourchannel")],
+        [InlineKeyboardButton(text="📢 Kanalga obuna bo‘lish", url=CHANNEL_LINK)],
         [InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_subs")]
     ])
     await message.answer(
-        f"Salom, {message.from_user.first_name}! 👋\n\n"
+        f"Salom, <b>{message.from_user.first_name}</b>! 👋\n\n"
         f"Botdan foydalanish uchun avval kanalga obuna bo‘ling 👇",
+        parse_mode="HTML",
         reply_markup=kb
     )
+
 
 # 🔹 Obuna tekshirish
 @dp.callback_query(lambda c: c.data == "check_subs")
 async def check_subscription(callback: types.CallbackQuery):
     try:
-        member = await bot.get_chat_member(chat_id="@yourchannel", user_id=callback.from_user.id)
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=callback.from_user.id)
         if member.status in ["member", "administrator", "creator"]:
             menu = ReplyKeyboardMarkup(resize_keyboard=True)
             menu.add(
@@ -45,8 +52,9 @@ async def check_subscription(callback: types.CallbackQuery):
         else:
             await callback.answer("Avval kanalga obuna bo‘ling!", show_alert=True)
     except Exception as e:
-        await callback.answer("Kanal topilmadi yoki bot admin emas!", show_alert=True)
-        print(e)
+        await callback.answer("⚠️ Kanalga bot admin qilinmagan yoki kanal topilmadi!", show_alert=True)
+        print("Xato:", e)
+
 
 # 🔹 Adminga yozish
 @dp.message(lambda m: m.text == "💬 Adminga yozish")
@@ -61,6 +69,7 @@ async def contact_admin(message: types.Message):
         else:
             await msg.answer("Admin sizsiz 😄")
 
+
 # 🔹 Hisob to‘ldirish
 @dp.message(lambda m: m.text == "💰 Hisobni to‘ldirish")
 async def deposit(message: types.Message):
@@ -68,7 +77,8 @@ async def deposit(message: types.Message):
         [InlineKeyboardButton(text="💳 Payme", callback_data="bank_payme")],
         [InlineKeyboardButton(text="💳 Click", callback_data="bank_click")]
     ])
-    await message.answer("To‘lov tizimini tanlang:", reply_markup=kb)
+    await message.answer("💰 To‘lov tizimini tanlang:", reply_markup=kb)
+
 
 @dp.callback_query(lambda c: c.data.startswith("bank_"))
 async def bank_choice(callback: types.CallbackQuery):
@@ -78,6 +88,7 @@ async def bank_choice(callback: types.CallbackQuery):
         "8600 1234 5678 9000 raqamiga to‘lov qiling va chekni yuboring."
     )
 
+
 # 🔹 O‘yinlar bo‘limi
 @dp.message(lambda m: m.text == "🎮 O‘yinlar")
 async def games_menu(message: types.Message):
@@ -85,25 +96,30 @@ async def games_menu(message: types.Message):
     kb.add("🎲 Qura tashlash", "🏀 Basketbol", "🔙 Ortga")
     await message.answer("🎮 O‘yin tanlang:", reply_markup=kb)
 
+
 @dp.message(lambda m: m.text == "🎲 Qura tashlash")
 async def dice_game(message: types.Message):
     x = random.randint(1, 6)
     await message.answer(f"🎲 Chiqqan son: {x}")
+
 
 @dp.message(lambda m: m.text == "🏀 Basketbol")
 async def basket(message: types.Message):
     result = random.choice(["200 so‘m yutding!", "Yutqazding 😢", "500 so‘m bonus!"])
     await message.answer(f"🏀 Natija: {result}")
 
+
 # 🔹 Buyurtma berish
 @dp.message(lambda m: m.text == "🛒 Buyurtma berish")
 async def order_cmd(message: types.Message):
     await message.answer("🛍 Buyurtmangizni yozing, tez orada admin javob beradi.")
 
+
 # 🔹 Botni ishga tushurish
 async def main():
     print("✅ Bot ishga tushdi...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
