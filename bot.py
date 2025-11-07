@@ -5,7 +5,7 @@ import os
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -15,14 +15,14 @@ from aiogram.types import (
 )
 
 # ---------------- CONFIG ----------------
-TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"   # <-- shu joyga tokeningizni qo'ying (yoki env orqali o'qing)
-ADMIN_ID = 7973934849           # siz yagona admin
+TOKEN = ""   # token joyiga o'zingnikini qo'y
+ADMIN_ID = 7973934849           # admin ID
 DATA_DIR = "data"
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 WITHDRAWS_FILE = os.path.join(DATA_DIR, "withdraws.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
-# Minimal init
+# ---------------- INIT ----------------
 os.makedirs(DATA_DIR, exist_ok=True)
 for f, default in [
     (USERS_FILE, {}),
@@ -33,7 +33,7 @@ for f, default in [
         with open(f, "w") as fh:
             json.dump(default, fh, indent=4)
 
-# ---------------- Helpers ----------------
+# ---------------- HELPERS ----------------
 def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
@@ -45,7 +45,6 @@ def save_json(path, data):
 def now_iso():
     return datetime.now().isoformat()
 
-# User utilities
 def get_user(uid: int) -> Dict[str, Any]:
     data = load_json(USERS_FILE)
     sid = str(uid)
@@ -57,20 +56,15 @@ def get_user(uid: int) -> Dict[str, Any]:
             "level": 1,
             "bonus_time": "1970-01-01T00:00:00",
             "invest": 0,
-            "invests": [],        # list of active invests (for tracking)
+            "invests": [],
             "ref": 0,
             "games": 0,
             "wins": 0,
-            "current_quiz": "",   # answer for quiz if active
+            "current_quiz": "",
+            "awaiting_withdraw": False
         }
         save_json(USERS_FILE, data)
     return data[sid]
-
-def update_user_field(uid: int, key: str, value):
-    data = load_json(USERS_FILE)
-    sid = str(uid)
-    data[sid][key] = value
-    save_json(USERS_FILE, data)
 
 def update_user(uid: int, patch: Dict[str, Any]):
     data = load_json(USERS_FILE)
@@ -78,7 +72,7 @@ def update_user(uid: int, patch: Dict[str, Any]):
     data[sid].update(patch)
     save_json(USERS_FILE, data)
 
-# Withdraw utilities
+# Withdraw functions
 def add_withdraw_request(uid: int, amount: int) -> Dict[str, Any]:
     withdraws = load_json(WITHDRAWS_FILE)
     req = {
@@ -101,7 +95,6 @@ def update_withdraw_status(req_id: str, status: str):
             break
     save_json(WITHDRAWS_FILE, withdraws)
 
-# Settings
 def get_settings():
     return load_json(SETTINGS_FILE)
 
@@ -110,7 +103,7 @@ def set_min_withdraw(amount: int):
     s["min_withdraw"] = amount
     save_json(SETTINGS_FILE, s)
 
-# ---------------- Bot init ----------------
+# ---------------- BOT INIT ----------------
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -125,401 +118,170 @@ def main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# ---------------- Games / Core features ----------------
-
-# Quiz bank
+# ---------------- GAMES ----------------
 QUIZ_QUESTIONS = [
     ("5 + 3 nechchi?", "8"),
-    ("O‘zbekiston poytaxti qayer?", "toshkent"),
+    ("O‘zbekiston poytaxti?", "toshkent"),
     ("10 - 4 nechchi?", "6"),
-    ("Dunyo okeanlari nechta?", "4"),
-    ("2 * 5 nechchi?", "10"),
+    ("2 * 5 nechchi?", "10")
 ]
 
-# Invest plans: (amount, percent, duration_seconds)
 INVEST_PLANS = {
-    "small":  (1000, 10, 60),    # 1 minute for demo
-    "medium": (5000, 15, 180),   # 3 minutes
-    "large":  (10000, 25, 300),  # 5 minutes
+    "small": (1000, 10, 60),
+    "medium": (5000, 15, 180),
+    "large": (10000, 25, 300)
 }
 
-# Start
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def start_cmd(message: types.Message):
     user = get_user(message.from_user.id)
-    text = (
-        f"👋 Salom, <b>{message.from_user.first_name}</b>!\n"
-        f"🎁 Boshlang‘ich balans: <b>{user['balance']}</b> so‘m\n"
-        f"⭐ Level: {user['level']} | XP: {user['xp']}\n\n"
-        "Bot menyusi — pastdagi tugmalardan tanlang."
-    )
-    await message.answer(text, reply_markup=main_menu(), parse_mode="HTML")
+    text = f"👋 Salom, {message.from_user.first_name}!\nBalans: {user['balance']} so‘m\nXP: {user['xp']} | Level: {user['level']}"
+    await message.answer(text, reply_markup=main_menu())
 
-# Balance
+# BALANCE
 @dp.message(F.text == "💰 Balans")
-async def show_balance(message: types.Message):
+async def balance(message: types.Message):
     u = get_user(message.from_user.id)
-    await message.answer(
-        f"💳 Balans: {u['balance']} so‘m\n"
-        f"🏦 Invest (aktiv): {u['invest']} so‘m\n"
-        f"🎮 O‘yinlar: {u['games']} | Yutuqlar: {u['wins']}\n"
-        f"⭐ XP: {u['xp']} | Level: {u['level']}"
-    )
+    await message.answer(f"💳 Balans: {u['balance']} so‘m\nLevel: {u['level']} | XP: {u['xp']}")
 
-# Game menu
+# GAME MENU
 @dp.message(F.text == "🎮 O‘yin")
 async def game_menu(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎯 Oddiy (1–5)", callback_data="game_basic")],
+        [InlineKeyboardButton(text="🎯 Raqam o‘yini", callback_data="game_basic")],
         [InlineKeyboardButton(text="🎰 Slot", callback_data="game_slot")],
-        [InlineKeyboardButton(text="🧩 Kvest", callback_data="game_quiz")]
+        [InlineKeyboardButton(text="🧩 Savol", callback_data="game_quiz")]
     ])
-    await message.answer("🎮 Qaysi o‘yinni tanlaysiz?", reply_markup=kb)
+    await message.answer("🎮 O‘yin tanlang:", reply_markup=kb)
 
-# Basic number game
+# BASIC GAME
 @dp.callback_query(F.data == "game_basic")
-async def game_basic_start(call: types.CallbackQuery):
-    user = get_user(call.from_user.id)
-    if user["balance"] < 1500:
-        await call.message.answer("❌ Pul yetarli emas! O‘yin uchun kamida 1500 soʻm kerak.")
-        return await call.answer()
+async def game_basic(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=str(i), callback_data=f"basic_{i}") for i in range(1, 6)]
+        [InlineKeyboardButton(text=str(i), callback_data=f"choose_{i}") for i in range(1, 6)]
     ])
-    await call.message.answer("🎯 1-5 oralig‘idan son tanlang:", reply_markup=kb)
+    await call.message.answer("1–5 oralig‘ida raqam tanlang:", reply_markup=kb)
     await call.answer()
 
-@dp.callback_query(F.data.startswith("basic_"))
-async def game_basic_play(call: types.CallbackQuery):
+@dp.callback_query(F.data.startswith("choose_"))
+async def choose_num(call: types.CallbackQuery):
+    user = get_user(call.from_user.id)
     chosen = int(call.data.split("_")[1])
     secret = random.randint(1, 5)
-    user = get_user(call.from_user.id)
-
-    # Ensure ability to deduct if lose (but never negative)
     if user["balance"] < 1500:
-        await call.message.answer("❌ Sizda yetarli mablag‘ yo‘q.")
+        await call.message.answer("❌ Yetarli mablag‘ yo‘q.")
         return await call.answer()
-
     if chosen == secret:
-        # win
         user["balance"] += 10000
-        user["xp"] += 10
-        user["wins"] += 1
-        result = f"🎉 To‘g‘ri! +10 000 so‘m. Raqam: {secret}"
+        msg = f"🎉 To‘g‘ri! +10 000 so‘m (raqam {secret})"
     else:
-        # lose
-        user["balance"] = max(0, user["balance"] - 1500)
-        result = f"😢 Afsus, raqam {secret} edi. −1 500 so‘m"
-
-    user["games"] += 1
-    # level up
-    if user["xp"] >= user["level"] * 100:
-        user["level"] += 1
-        result += f"\n🏅 Siz {user['level']} darajaga ko‘tarildingiz!"
-
-    update_user(call.from_user.id, user)
-    await call.message.answer(result)
-    await call.answer()
-
-# Slot
-@dp.callback_query(F.data == "game_slot")
-async def game_slot_play(call: types.CallbackQuery):
-    user = get_user(call.from_user.id)
-    if user["balance"] < 1500:
-        await call.message.answer("❌ Pul yetarli emas! Kamida 1500 so‘m kerak.")
-        return await call.answer()
-
-    emojis = ["🍒", "🍋", "🍊", "⭐", "💎", "7️⃣"]
-    slots = [random.choice(emojis) for _ in range(3)]
-    display = " | ".join(slots)
-    if slots[0] == slots[1] == slots[2]:
-        user["balance"] += 10000
-        user["wins"] += 1
-        msg = f"🎰 {display}\n🎉 Jackpot! +10 000 so‘m"
-    else:
-        user["balance"] = max(0, user["balance"] - 1500)
-        msg = f"🎰 {display}\n❌ Yutqazdingiz. −1 500 so‘m"
-
-    user["games"] += 1
-    # XP reward small
-    user["xp"] += 5
-    if user["xp"] >= user["level"] * 100:
-        user["level"] += 1
-        msg += f"\n🏅 Level oshdi: {user['level']}"
-
+        user["balance"] -= 1500
+        msg = f"😢 Afsus! Raqam {secret} edi. −1 500 so‘m"
     update_user(call.from_user.id, user)
     await call.message.answer(msg)
     await call.answer()
 
-# Quiz start
-@dp.callback_query(F.data == "game_quiz")
-async def game_quiz_start(call: types.CallbackQuery):
+# SLOT GAME
+@dp.callback_query(F.data == "game_slot")
+async def slot(call: types.CallbackQuery):
     user = get_user(call.from_user.id)
     if user["balance"] < 1500:
-        await call.message.answer("❌ Pul yetarli emas! Kamida 1500 so‘m kerak.")
+        await call.message.answer("❌ Pul yetarli emas.")
         return await call.answer()
-    q, a = random.choice(QUIZ_QUESTIONS)
-    # save current correct answer to user
-    user["current_quiz"] = a.lower().strip()
+    emojis = ["🍒", "🍋", "💎", "⭐", "7️⃣"]
+    s = [random.choice(emojis) for _ in range(3)]
+    if s[0] == s[1] == s[2]:
+        user["balance"] += 10000
+        msg = f"🎰 {' | '.join(s)}\n🎉 Yutdingiz +10 000 so‘m!"
+    else:
+        user["balance"] -= 1500
+        msg = f"🎰 {' | '.join(s)}\n❌ Yutqazdingiz −1 500 so‘m"
     update_user(call.from_user.id, user)
-    await call.message.answer(f"🧩 Savol: {q}\n✍️ Javobni yozing (tekshirish uchun 1 daqiqa bor).")
+    await call.message.answer(msg)
     await call.answer()
 
-# Handle quiz answers (any message)
+# QUIZ
+@dp.callback_query(F.data == "game_quiz")
+async def quiz_start(call: types.CallbackQuery):
+    q, a = random.choice(QUIZ_QUESTIONS)
+    user = get_user(call.from_user.id)
+    user["current_quiz"] = a.lower()
+    update_user(call.from_user.id, user)
+    await call.message.answer(f"🧩 Savol: {q}\n✍️ Javobni yozing.")
+    await call.answer()
+
 @dp.message()
-async def catch_all_messages(message: types.Message):
-    # If user has active quiz answer expected
+async def message_handler(message: types.Message):
     user = get_user(message.from_user.id)
-    # Only treat as quiz if current_quiz is set and message is not a command or menu text
     text = message.text.strip().lower()
+
+    # QUIZ CHECK
     if user.get("current_quiz"):
         correct = user["current_quiz"]
-        # reset field after checking
         user["current_quiz"] = ""
         if text == correct:
             user["balance"] += 10000
-            user["xp"] += 15
-            user["wins"] += 1
-            resp = "🎉 To‘g‘ri javob! +10 000 so‘m va +15 XP"
+            msg = "🎉 To‘g‘ri! +10 000 so‘m"
         else:
-            user["balance"] = max(0, user["balance"] - 1500)
-            resp = f"❌ Noto‘g‘ri javob. To‘g‘ri javob: {correct}. −1 500 so‘m"
-        user["games"] += 1
-        # level check
-        if user["xp"] >= user["level"] * 100:
-            user["level"] += 1
-            resp += f"\n🏅 Level oshdi: {user['level']}"
+            user["balance"] -= 1500
+            msg = f"❌ Noto‘g‘ri! To‘g‘ri javob: {correct}"
         update_user(message.from_user.id, user)
-        await message.answer(resp)
+        await message.answer(msg)
         return
 
-    # If not quiz, ignore here — normal menu commands handled above.
-    # This avoids interfering with other flows.
-    return
+    # WITHDRAW CHECK
+    if user.get("awaiting_withdraw"):
+        if not text.isdigit():
+            return await message.answer("Faqat son kiriting.")
+        amount = int(text)
+        settings = get_settings()
+        min_w = settings.get("min_withdraw", 5000)
+        if amount < min_w:
+            return await message.answer(f"Minimal {min_w} so‘m.")
+        if amount > user["balance"]:
+            return await message.answer("Balansda mablag‘ yetarli emas.")
+        req = add_withdraw_request(message.from_user.id, amount)
+        user["awaiting_withdraw"] = False
+        update_user(message.from_user.id, user)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"approve_{req['id']}"),
+             InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject_{req['id']}")]
+        ])
+        await bot.send_message(ADMIN_ID, f"Yangi so‘rov: {amount} so‘m", reply_markup=kb)
+        return await message.answer("So‘rov yuborildi, admin tasdiqlaydi.")
 
-# ---------------- Bonus ----------------
-@dp.message(F.text == "🎁 Bonus")
-async def cmd_bonus(message: types.Message):
-    user = get_user(message.from_user.id)
-    last = datetime.fromisoformat(user.get("bonus_time", "1970-01-01T00:00:00"))
-    if datetime.now() - last < timedelta(hours=24):
-        remaining = timedelta(hours=24) - (datetime.now() - last)
-        hours = remaining.seconds // 3600
-        await message.answer(f"⏳ Bonusni {hours} soatdan keyin olishingiz mumkin.")
-        return
-    user["balance"] += 500
-    user["bonus_time"] = now_iso()
-    update_user(message.from_user.id, user)
-    await message.answer("🎁 Bonus berildi: +500 so‘m!")
-
-# ---------------- Invest ----------------
-@dp.message(F.text == "🏦 Invest")
-async def cmd_invest(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💼 Kichik (1000 so‘m, 10%)", callback_data="inv_small")],
-        [InlineKeyboardButton(text="📈 O‘rta (5000 so‘m, 15%)", callback_data="inv_medium")],
-        [InlineKeyboardButton(text="🏦 Katta (10000 so‘m, 25%)", callback_data="inv_large")],
-    ])
-    await message.answer("Sarmoya rejangizni tanlang (demo vaqt bilan):", reply_markup=kb)
-
-async def process_invest_finish(uid: int, plan_name: str, amount: int, percent: int, duration: int):
-    # Wait for duration then pay profit
-    await asyncio.sleep(duration)
-    user = get_user(uid)
-    profit = int(amount * percent / 100)
-    user["balance"] += amount + profit
-    # reduce invest recorded in user.invests
-    user["invest"] = max(0, user.get("invest", 0) - amount)
-    # remove invest record if stored
-    invests = user.get("invests", [])
-    invests = [it for it in invests if it.get("id") != f"{uid}_{plan_name}_{amount}"]
-    user["invests"] = invests
-    # save and notify
-    update_user(uid, user)
-    try:
-        await bot.send_message(uid, f"💰 Sarmoya yakunlandi! Sizga {profit} so‘m foyda qo‘shildi.")
-    except:
-        pass
-
-@dp.callback_query(F.data.startswith("inv_"))
-async def inv_callback(call: types.CallbackQuery):
-    plan = call.data.split("_", 1)[1]  # small/medium/large
-    p = None
-    if plan == "small":
-        p = INVEST_PLANS["small"]
-    elif plan == "medium":
-        p = INVEST_PLANS["medium"]
-    elif plan == "large":
-        p = INVEST_PLANS["large"]
-    if not p:
-        await call.message.answer("Noto‘g‘ri reja tanlandi.")
-        return await call.answer()
-    amount, percent, duration = p
-    user = get_user(call.from_user.id)
-    if user["balance"] < amount:
-        await call.message.answer("❌ Balansingizda mablag‘ yetarli emas.")
-        return await call.answer()
-    # Deduct and record invest
-    user["balance"] -= amount
-    user["invest"] = user.get("invest", 0) + amount
-    invest_record = {"id": f"{call.from_user.id}_{plan}_{amount}", "plan": plan, "amount": amount, "percent": percent, "started": now_iso()}
-    user.setdefault("invests", []).append(invest_record)
-    update_user(call.from_user.id, user)
-    # create background task to finish invest
-    asyncio.create_task(process_invest_finish(call.from_user.id, plan, amount, percent, duration))
-    await call.message.answer(f"✅ {amount} so‘m sarmoya qilindi. {percent}% foyda — kuting...")
-    await call.answer()
-
-# ---------------- Referal ----------------
-@dp.message(F.text == "👥 Referal")
-async def cmd_referral(message: types.Message):
-    me = await bot.get_me()
-    link = f"https://t.me/{me.username}?start={message.from_user.id}"
-    await message.answer(f"👥 Do‘stlaringizni taklif qiling, har bir kelgan user uchun 5% bonus olasiz.\n\n🔗 {link}")
-
-# ---------------- Withdraw (user request -> admin confirm) ----------------
-@dp.message(F.text == "💸 Pul yechish")
-async def cmd_withdraw_request(message: types.Message):
-    settings = get_settings()
-    await message.answer(f"💸 Yechmoqchi bo‘lgan summangizni kiriting (minimal: {settings['min_withdraw']} so‘m).")
-    # register next message handler: we'll use a simple state in file to avoid advanced FSM
-    # set a temporary marker in user's data
-    user = get_user(message.from_user.id)
-    user["awaiting_withdraw"] = True
-    update_user(message.from_user.id, user)
-
-@dp.message()
-async def handle_withdraw_amount(message: types.Message):
-    # Only act if user expects withdraw input
-    user = get_user(message.from_user.id)
-    if not user.get("awaiting_withdraw"):
-        # Already handled by quiz handler earlier or ignored.
-        # We must ensure not to conflict: quiz handled above because we returned early when quiz active.
-        return
-    text = message.text.strip().replace(",", "")
-    if not text.isdigit():
-        await message.answer("❌ Iltimos faqat son kiriting.")
-        return
-    amount = int(text)
-    settings = get_settings()
-    min_w = settings.get("min_withdraw", 5000)
-    if amount < min_w:
-        await message.answer(f"❌ Minimal yechish summasi {min_w} so‘m. Yana urinib ko‘ring.")
-        return
-    if amount > user["balance"]:
-        await message.answer("❌ Balansingizda bunday summa yo‘q.")
-        return
-    # create request, do not deduct until admin approves
-    req = add_withdraw_request(message.from_user.id, amount)
-    # clear awaiting flag
-    user["awaiting_withdraw"] = False
-    update_user(message.from_user.id, user)
-    await message.answer("✅ Yechim so‘rovingiz adminga yuborildi. Tasdiqlangandan keyin pul yechiladi.")
-    # notify admin with approve/reject buttons
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"approve_{req['id']}"),
-         InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject_{req['id']}")]
-    ])
-    try:
-        await bot.send_message(ADMIN_ID, f"📥 Yechim so‘rovi: user={message.from_user.id} amount={amount} so‘m\nID: {req['id']}", reply_markup=kb)
-    except:
-        pass
-
+# ADMIN CALLBACKS
 @dp.callback_query(F.data.startswith("approve_") | F.data.startswith("reject_"))
-async def admin_decision(call: types.CallbackQuery):
+async def admin_action(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_ID:
-        return await call.answer("Siz admin emassiz!", show_alert=True)
+        return await call.answer("Admin emassiz!", show_alert=True)
     data = call.data
     action, reqid = data.split("_", 1)
     withdraws = load_json(WITHDRAWS_FILE)
     req = next((r for r in withdraws if r["id"] == reqid), None)
     if not req:
-        await call.message.answer("So‘rov topilmadi.")
-        return await call.answer()
-    if req["status"] != "pending":
-        await call.message.answer("Bu so‘rov avvaldan qayta ishlangan.")
-        return await call.answer()
+        return await call.message.answer("So‘rov topilmadi.")
     uid = req["user_id"]
     amount = req["amount"]
     if action == "approve":
-        # deduct
         user = get_user(uid)
         if user["balance"] < amount:
-            await call.message.answer("❌ Foydalanuvchida yetarli mablag‘ yo‘q - rad qilindi.")
             update_withdraw_status(reqid, "failed")
-            await call.answer()
-            return
+            return await call.message.answer("Balans yetarli emas.")
         user["balance"] -= amount
         update_user(uid, user)
         update_withdraw_status(reqid, "approved")
-        await call.message.answer(f"✅ So‘rov tasdiqlandi. {amount} so‘m yechildi.")
-        try:
-            await bot.send_message(uid, f"✅ Sizning yechish so‘rovingiz tasdiqlandi. {amount} so‘m yechildi.")
-        except:
-            pass
+        await bot.send_message(uid, f"✅ {amount} so‘m yechildi.")
+        await call.message.answer("Tasdiqlandi.")
     else:
         update_withdraw_status(reqid, "rejected")
-        await call.message.answer("❌ So‘rov rad etildi.")
-        try:
-            await bot.send_message(uid, "❌ Sizning yechish so‘rovingiz admin tomonidan rad etildi.")
-        except:
-            pass
+        await bot.send_message(uid, "❌ So‘rovingiz rad etildi.")
+        await call.message.answer("Rad etildi.")
     await call.answer()
 
-# ---------------- Ranking / Stats ----------------
-@dp.message(F.text == "🏆 Reyting")
-async def cmd_ranking(message: types.Message):
-    data = load_json(USERS_FILE)
-    arr = sorted(data.values(), key=lambda u: u.get("balance", 0), reverse=True)[:10]
-    if not arr:
-        return await message.answer("Hozircha foydalanuvchi yo‘q.")
-    text = "🏆 Top 10 boy foydalanuvchilar:\n\n"
-    for i, u in enumerate(arr, 1):
-        name = f"User {u.get('id')}"
-        text += f"{i}. {name} — {u.get('balance',0)} so‘m\n"
-    await message.answer(text)
+# RUN
+async def main():
+    await dp.start_polling(bot)
 
-@dp.message(F.text == "📊 Statistika")
-async def cmd_stats(message: types.Message):
-    data = load_json(USERS_FILE)
-    total_users = len(data)
-    total_balance = sum(u.get("balance", 0) for u in data.values())
-    total_games = sum(u.get("games", 0) for u in data.values())
-    await message.answer(
-        f"📊 Umumiy statistika:\n\nFoydalanuvchilar: {total_users}\nJami balans: {total_balance} so‘m\nO‘yinlar: {total_games}"
-    )
-
-# ---------------- Admin panel ----------------
-@dp.message(F.text == "⚙️ Admin panel")
-async def cmd_admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.answer("❌ Siz admin emassiz.")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Foydalanuvchilar", callback_data="admin_users")],
-        [InlineKeyboardButton(text="📥 Yechim so‘rovlari", callback_data="admin_withdraws")],
-        [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin_settings")],
-        [InlineKeyboardButton(text="📢 Hammaga xabar", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="📈 Statistika", callback_data="admin_stats")],
-    ])
-    await message.answer("👑 Admin panel:", reply_markup=kb)
-
-@dp.callback_query(F.data == "admin_users")
-async def admin_users(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Siz admin emassiz!")
-    data = load_json(USERS_FILE)
-    await call.message.answer(f"📋 Foydalanuvchilar soni: {len(data)}")
-    await call.answer()
-
-@dp.callback_query(F.data == "admin_withdraws")
-async def admin_withdraws(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Siz admin emassiz!")
-    withdraws = load_json(WITHDRAWS_FILE)
-    pending = [w for w in withdraws if w["status"] == "pending"]
-    if not pending:
-        await call.message.answer("📭 Pending so‘rovlar yo‘q.")
-        return await call.answer()
-    for w in pending:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-         
+if __name__ == "__main__":
+    asyncio.run(main())
