@@ -1,530 +1,518 @@
-# bot_all.py
+#!/usr/bin/env python3
+# bot.py
+# Aiogram 3.x single-file bot: tasks, games, balance, payments, admin panel
+# Replace TOKEN and ADMINS with your values
+
 import asyncio
-import json
-import os
-import time
-from typing import Dict, Any, List, Optional
+import logging
+import sqlite3
+from typing import Optional, List, Tuple
+from pathlib import Path
+import random
 
-import aiohttp
 from aiogram import Bot, Dispatcher, types
-from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.filters import Command, Text
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardMarkup,
+    InlineKeyboardButton, InputFile
+)
 
-# ========== CONFIG ==========
-BOT_TOKEN = "8295341226:AAGfbow1rcM6gAJSO-2XnlTKN0Dk0brg4AE"   # <-- o'zgartiring (yoki env dan oling)
-ADMIN_ID = 7973934849           # <-- o'zgartiring (Sizning Telegram ID)
-ADMIN_PASS = "1234"             # oddiy admin parol (xohlasangiz o'zgartiring)
-DATA_DIR = "data"
-# ========== END CONFIG ==========
+# ---------- CONFIG ----------
+TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
+ADMINS = [123456789]  # list of admin Telegram user IDs (integers)
 
-# Ensure data dir
-os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = "bot_data.db"
+REQUIRED_CHANNELS_TABLE = "required_channels"  # table name reference
 
-# JSON fayl nomlari
-CHANNELS_FILE = os.path.join(DATA_DIR, "channels.json")
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
-SERVICES_FILE = os.path.join(DATA_DIR, "services.json")
-USERS_FILE = os.path.join(DATA_DIR, "users.json")
-ORDERS_FILE = os.path.join(DATA_DIR, "orders.json")
-DEPOSITS_FILE = os.path.join(DATA_DIR, "deposits.json")
-WITHDRAWS_FILE = os.path.join(DATA_DIR, "withdraws.json")
+# ---------- LOGGING ----------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# init files if not exist
-_defaults = {
-    CHANNELS_FILE: [],
-    SETTINGS_FILE: {"api_url": "", "api_key": "", "percent": 10},
-    SERVICES_FILE: [],
-    USERS_FILE: {},
-    ORDERS_FILE: {},
-    DEPOSITS_FILE: {},
-    WITHDRAWS_FILE: {}
-}
-for f, default in _defaults.items():
-    if not os.path.exists(f):
-        with open(f, "w", encoding="utf-8") as fh:
-            json.dump(default, fh, ensure_ascii=False, indent=2)
+# ---------- DATABASE HELPERS ----------
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# Helper read/write with simple error handling
-def read_json(path: str):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        # agar fayl buzilgan bo'lsa, qayta yarating default bilan
-        return _defaults.get(path, {})
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
 
-def write_json(path: str, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # users
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY,
+        username TEXT,
+        balance REAL DEFAULT 0,
+        ref INTEGER DEFAULT 0
+    )
+    """)
+    # payments (toplash)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        amount REAL,
+        status TEXT,
+        receipt_file_id TEXT,
+        bank_name TEXT
+    )
+    """)
+    # withdraw requests
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS withdraws (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        amount REAL,
+        card TEXT,
+        status TEXT
+    )
+    """)
+    # tasks (admin creates)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        description TEXT,
+        link TEXT,
+        reward REAL,
+        media_file_id TEXT
+    )
+    """)
+    # user tasks (submissions)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER,
+        user_id INTEGER,
+        proof_file_id TEXT,
+        status TEXT
+    )
+    """)
+    # banks (for deposit info)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS banks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        card TEXT
+    )
+    """)
+    # services (placeholder for API services)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        api_url TEXT,
+        api_key TEXT,
+        percent REAL DEFAULT 0
+    )
+    """)
+    # required channels (for mandatory subscription)
+    cur.execute(f"""
+    CREATE TABLE IF NOT EXISTS {REQUIRED_CHANNELS_TABLE} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT,
+        title TEXT
+    )
+    """)
+    # settings
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
 
+# ---------- UTIL ----------
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMINS
 
-# --- Utility functions for persistent storage ---
+def ensure_user(user_id: int, username: Optional[str]):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?,?)", (user_id, username))
+    cur.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
+    conn.commit()
+    conn.close()
 
-def get_channels() -> List[str]:
-    return read_json(CHANNELS_FILE)
+def get_user_balance(user_id: int) -> float:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return float(row["balance"]) if row else 0.0
 
-def add_channel(username: str):
-    ch = get_channels()
-    if username not in ch:
-        ch.append(username)
-        write_json(CHANNELS_FILE, ch)
+def change_user_balance(user_id: int, delta: float):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (delta, user_id))
+    conn.commit()
+    conn.close()
 
-def remove_channel(username: str):
-    ch = get_channels()
-    if username in ch:
-        ch.remove(username)
-        write_json(CHANNELS_FILE, ch)
+# ---------- KEYBOARDS ----------
+def main_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("📋 Buyurtma berish (Vazifa)", callback_data="menu_tasks")],
+        [InlineKeyboardButton("🎮 O'yinlar", callback_data="menu_games")],
+        [InlineKeyboardButton("💰 Hisobni to'ldirish", callback_data="menu_deposit")],
+        [InlineKeyboardButton("💸 Pul yechish", callback_data="menu_withdraw")],
+        [InlineKeyboardButton("⚙️ Profil / Balans", callback_data="menu_profile")],
+    ])
+    return kb
 
-def get_settings() -> Dict[str, Any]:
-    return read_json(SETTINGS_FILE)
+def admin_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("📝 Vazifa qo'shish", callback_data="admin_add_task")],
+        [InlineKeyboardButton("🏦 Bank qo'shish", callback_data="admin_add_bank")],
+        [InlineKeyboardButton("📢 Xabar yuborish", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🔧 Majburiy kanallar", callback_data="admin_channels")],
+        [InlineKeyboardButton("💳 To'lovlarni ko'rish", callback_data="admin_payments")],
+        [InlineKeyboardButton("💵 Yechimlar", callback_data="admin_withdraws")],
+    ])
+    return kb
 
-def save_settings(d: Dict[str, Any]):
-    write_json(SETTINGS_FILE, d)
+def games_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("🏀 Basket (1x-6x)", callback_data="game_basket")],
+        [InlineKeyboardButton("🎲 Qura tashlash", callback_data="game_lottery")],
+        [InlineKeyboardButton("💣 Bomba (xavfli)", callback_data="game_bomb")],
+        [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_main")],
+    ])
+    return kb
 
-def get_services() -> List[Dict[str, Any]]:
-    return read_json(SERVICES_FILE)
+def deposit_banks_keyboard() -> InlineKeyboardMarkup:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM banks")
+    rows = cur.fetchall()
+    buttons = []
+    for r in rows:
+        buttons.append([InlineKeyboardButton(r["name"], callback_data=f"deposit_bank:{r['id']}")])
+    if not buttons:
+        buttons = [[InlineKeyboardButton("Admin hali bank qo'shmagan", callback_data="no_bank")]]
+    buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def save_services(svcs: List[Dict[str, Any]]):
-    write_json(SERVICES_FILE, svcs)
-
-def get_users() -> Dict[str, Any]:
-    return read_json(USERS_FILE)
-
-def save_users(u: Dict[str, Any]):
-    write_json(USERS_FILE, u)
-
-def get_orders() -> Dict[str, Any]:
-    return read_json(ORDERS_FILE)
-
-def save_orders(o: Dict[str, Any]):
-    write_json(ORDERS_FILE, o)
-
-def get_deposits() -> Dict[str, Any]:
-    return read_json(DEPOSITS_FILE)
-
-def save_deposits(d: Dict[str, Any]):
-    write_json(DEPOSITS_FILE, d)
-
-def get_withdraws() -> Dict[str, Any]:
-    return read_json(WITHDRAWS_FILE)
-
-def save_withdraws(w: Dict[str, Any]):
-    write_json(WITHDRAWS_FILE, w)
-
-# --- ID generator for orders / deposits / withdraws ---
-def gen_id(prefix="ORD"):
-    return f"{prefix}{int(time.time()*1000)}"
-
-# --- Bot & Dispatcher init ---
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+# ---------- BOT SETUP ----------
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- Sub check ---
-async def check_subs(user_id: int) -> bool:
-    channels = get_channels()
-    if not channels:
-        return True  # agar kanal belgilanmagan bo'lsa, chek o'tkazilmasin
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in ("left", "kicked"):
-                return False
-        except Exception:
-            # kanalga bot admin bo'lmasa yoki xato bo'lsa - tekshirishni o'tkazib yubor
-            return False
-    return True
-
-# --- User balance helpers ---
-def get_balance(user_id: int) -> float:
-    users = get_users()
-    uid = str(user_id)
-    return float(users.get(uid, {}).get("balance", 0.0))
-
-def add_balance(user_id: int, amount: float):
-    users = get_users()
-    uid = str(user_id)
-    if uid not in users:
-        users[uid] = {"balance": 0.0, "session": {}}
-    users[uid]["balance"] = float(users[uid].get("balance", 0.0)) + float(amount)
-    save_users(users)
-
-def sub_balance(user_id: int, amount: float) -> bool:
-    users = get_users()
-    uid = str(user_id)
-    bal = float(users.get(uid, {}).get("balance", 0.0))
-    if bal >= amount:
-        users[uid]["balance"] = bal - amount
-        save_users(users)
-        return True
-    return False
-
-# --- API interaction for services & orders (SMM panel) ---
-async def fetch_services_from_api():
-    settings = get_settings()
-    api_url = settings.get("api_url", "").rstrip("/")
-    api_key = settings.get("api_key", "")
-    if not api_url or not api_key:
-        return {"error": "API sozlanmagan."}
-    url = f"{api_url}/services"
-    headers = {"Authorization": api_key}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
-                data = await resp.json()
-                save_services(data)
-                return {"ok": True, "count": len(data)}
-    except Exception as e:
-        return {"error": str(e)}
-
-async def create_order_api(service_id: int, link: str, quantity: int) -> Dict[str, Any]:
-    settings = get_settings()
-    api_url = settings.get("api_url", "").rstrip("/")
-    api_key = settings.get("api_key", "")
-    if not api_url or not api_key:
-        return {"error": "API sozlanmagan."}
-    url = f"{api_url}/order"
-    payload = {"service": service_id, "link": link, "quantity": quantity}
-    headers = {"Authorization": api_key, "Content-Type": "application/json"}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=20) as resp:
-                return await resp.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-async def get_order_status_api(order_id: int) -> Dict[str, Any]:
-    settings = get_settings()
-    api_url = settings.get("api_url", "").rstrip("/")
-    api_key = settings.get("api_key", "")
-    if not api_url or not api_key:
-        return {"error": "API sozlanmagan."}
-    url = f"{api_url}/order/{order_id}"
-    headers = {"Authorization": api_key}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
-                return await resp.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-# ========== HANDLERS ==========
-
-# Start / main menu
+# ---------- START & HELP ----------
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
-    # clear ephemeral session.step? optionally keep
-    # Build main menu
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📦 Buyurtma berish", callback_data="menu_order")
-    kb.button(text="💰 Hisobni toʻldirish", callback_data="menu_deposit")
-    kb.button(text="🏧 Pul yechish", callback_data="menu_withdraw")
-    kb.button(text="🧑‍💻 Admin panel", callback_data="menu_admin")
-    kb.button(text="🔄 Kanallarni tekshirish", callback_data="check_subs")
-    await message.answer(f"Xush kelibsiz, {message.from_user.first_name}!\nKerakli bo‘limni tanlang:", reply_markup=kb.as_markup())
-
-# Check subscription button
-@dp.callback_query(lambda c: c.data == "check_subs")
-async def cb_check_subs(cq: CallbackQuery):
-    ok = await check_subs(cq.from_user.id)
-    if ok:
-        await cq.answer("✅ Obuna tekshirildi. Hamma yaxshi.")
-        # show main menu again
-        await cmd_start(cq.message)
+async def cmd_start(msg: Message):
+    ensure_user(msg.from_user.id, msg.from_user.username)
+    # Check required channels and ask user to subscribe (we won't auto-verify, admin must check proof)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(f"SELECT chat_id, title FROM {REQUIRED_CHANNELS_TABLE}")
+    rows = cur.fetchall()
+    if rows:
+        text = "Assalomu alaykum! Botga xush kelibsiz.\nIltimos, quyidagi kanallarga obuna bo'ling va tekshiruv uchun screenshot yuboring:\n\n"
+        for r in rows:
+            text += f"• {r['title']}\n"
+        text += "\nObuna bo'lib bo'lgach, /start ni qayta bosing yoki /profile orqali tasdiqlovchi fayl yuboring."
     else:
-        # show channels list with links
-        channels = get_channels()
-        if not channels:
-            await cq.answer("Hech qanday kanal belgilanmagan.", show_alert=True)
-            return
-        kb = InlineKeyboardBuilder()
-        for ch in channels:
-            ch_clean = ch.replace("@", "")
-            kb.button(text=f"🔗 {ch}", url=f"https://t.me/{ch_clean}")
-        kb.button(text="✅ Obuna bo'ldim", callback_data="check_subs")
-        await cq.message.answer("Iltimos quyidagi kanallarga obuna bo'ling:", reply_markup=kb.as_markup())
+        text = "Assalomu alaykum! Botga xush kelibsiz."
 
-# --- ORDER FLOW ---
-@dp.callback_query(lambda c: c.data == "menu_order")
-async def cb_menu_order(cq: CallbackQuery):
-    settings = get_settings()
-    if not settings.get("api_url") or not settings.get("api_key"):
-        await cq.message.answer("⚠️ Xizmatlar API sozlanmagan. Admin bilan murojaat qiling.")
-        return
-    svc_list = get_services()
-    if not svc_list:
-        res = await fetch_services_from_api()
-        if res.get("error"):
-            await cq.message.answer(f"Xizmatlarni yuklashda xato: {res['error']}")
-            return
-        svc_list = get_services()
-    # show first 30 services
-    kb = InlineKeyboardBuilder()
-    for svc in svc_list[:30]:
-        text = f"{svc.get('name')} — {svc.get('rate')}"
-        cb = f"svc_{svc.get('id')}"
-        kb.button(text=text, callback_data=cb)
-    kb.button(text="🔄 Yangilash", callback_data="refresh_services")
-    kb.button(text="⬅️ Orqaga", callback_data="back_main")
-    await cq.message.answer("Xizmatlardan birini tanlang:", reply_markup=kb.as_markup())
+    await msg.answer(text, reply_markup=main_keyboard())
 
-@dp.callback_query(lambda c: c.data == "refresh_services")
-async def cb_refresh_services(cq: CallbackQuery):
-    await cq.message.answer("Xizmatlar yangilanmoqda...")
-    res = await fetch_services_from_api()
-    if res.get("error"):
-        await cq.message.answer(f"Xato: {res['error']}")
-    else:
-        await cq.message.answer(f"✅ {res.get('count')} ta xizmat yuklandi.")
-    await cb_menu_order(cq)
+@dp.message(Command("admin"))
+async def cmd_admin(msg: Message):
+    if not is_admin(msg.from_user.id):
+        await msg.reply("Siz admin emassiz.")
+        return
+    await msg.answer("Admin panel:", reply_markup=admin_keyboard())
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("svc_"))
-async def cb_select_service(cq: CallbackQuery):
-    svc_id = int(cq.data.split("_", 1)[1])
-    services = get_services()
-    svc = next((s for s in services if int(s.get("id")) == svc_id), None)
-    if not svc:
-        await cq.message.answer("Xizmat topilmadi.")
-        return
-    # saqlash: foydalanuvchini session bilan belgilash
-    users = get_users()
-    uid = str(cq.from_user.id)
-    if uid not in users:
-        users[uid] = {"balance": 0.0, "session": {}}
-    users[uid]["session"] = {
-        "step": "await_link",
-        "service_id": svc_id,
-        "service_name": svc.get("name"),
-        "rate": float(svc.get("rate", 0))
-    }
-    save_users(users)
-    await cq.message.answer(f"✅ Tanlandi: {svc.get('name')}\nIltimos, buyurtma uchun LINK yuboring (masalan: Instagram profili yoki post link):")
+# ---------- PROFILE ----------
+@dp.callback_query(Text("menu_profile"))
+async def cb_profile(cq: CallbackQuery):
+    uid = cq.from_user.id
+    ensure_user(uid, cq.from_user.username)
+    bal = get_user_balance(uid)
+    text = f"👤 @{cq.from_user.username or cq.from_user.first_name}\n💰 Hisob: {bal:.2f} so'm\n\nKerakli tugmalar:"
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("📊 Hisobni ko'rsatish", callback_data="profile_show")],
+        [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_main")],
+    ]))
 
-# Global text message handler for session steps (link, quantity, deposit amount)
-@dp.message()
-async def global_text_handler(message: Message):
-    # ignore commands here
-    if message.text and message.text.startswith("/"):
+@dp.callback_query(Text("profile_show"))
+async def cb_profile_show(cq: CallbackQuery):
+    uid = cq.from_user.id
+    bal = get_user_balance(uid)
+    await cq.answer(f"Sizning balansingiz: {bal:.2f} so'm", show_alert=True)
+
+# ---------- MAIN NAV ----------
+@dp.callback_query(Text("back_to_main"))
+async def cb_back(cq: CallbackQuery):
+    await cq.message.edit_text("Asosiy menyu:", reply_markup=main_keyboard())
+
+# ---------- TASKS (Vazifalar) ----------
+@dp.callback_query(Text("menu_tasks"))
+async def cb_menu_tasks(cq: CallbackQuery):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, title, reward FROM tasks")
+    rows = cur.fetchall()
+    if not rows:
+        await cq.message.edit_text("Hozircha vazifalar yo'q. Keyinroq qaytib keling.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_main")],
+        ]))
         return
-    users = get_users()
-    uid = str(message.from_user.id)
-    session = users.get(uid, {}).get("session", {})
-    step = session.get("step")
-    # --- ORDER: awaiting link ---
-    if step == "await_link":
-        link = message.text.strip()
-        users[uid]["session"]["link"] = link
-        users[uid]["session"]["step"] = "await_qty"
-        save_users(users)
-        await message.answer("Link qabul qilindi. Endi miqdorni (son bilan) yuboring:")
+    kb = InlineKeyboardMarkup()
+    for r in rows:
+        kb.add(InlineKeyboardButton(f"{r['title']} — {r['reward']} so'm", callback_data=f"task_view:{r['id']}"))
+    kb.add(InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_main"))
+    await cq.message.edit_text("Mavcut vazifalar:", reply_markup=kb)
+
+@dp.callback_query(Text(startswith="task_view:"))
+async def cb_task_view(cq: CallbackQuery):
+    task_id = int(cq.data.split(":")[1])
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    t = cur.fetchone()
+    if not t:
+        await cq.answer("Vazifa topilmadi.", show_alert=True)
         return
-    # --- ORDER: awaiting quantity ---
-    if step == "await_qty":
+    text = f"📝 {t['title']}\n\n{t['description']}\n\nMukofot: {t['reward']} so'm"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ Vazifani bajarib proof yuborish", callback_data=f"task_do:{task_id}")],
+        [InlineKeyboardButton("🔗 Linkga o'tish", url=t['link'] if t['link'] else "https://t.me")],
+        [InlineKeyboardButton("🔙 Orqaga", callback_data="menu_tasks")],
+    ])
+    await cq.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query(Text(startswith="task_do:"))
+async def cb_task_do(cq: CallbackQuery):
+    task_id = int(cq.data.split(":")[1])
+    await cq.message.answer("Vazifani bajarib, proof (rasm yoki video) yuboring. Yuborilgan fayl adminga tasdiqlash uchun jo'natiladi.")
+    # Save a pending row indicating awaiting proof: we create a user_tasks entry with status 'awaiting_proof' and null proof_file_id
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO user_tasks (task_id, user_id, status) VALUES (?,?,?)", (task_id, cq.from_user.id, "awaiting_proof"))
+    conn.commit()
+    await cq.answer("Iltimos, fayl yuboring...")
+
+@dp.message(lambda message: message.photo or message.video or message.document)
+async def handle_proof(msg: Message):
+    # find latest awaiting_proof for this user
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM user_tasks WHERE user_id = ? AND status = ? ORDER BY id DESC LIMIT 1", (msg.from_user.id, "awaiting_proof"))
+    row = cur.fetchone()
+    if not row:
+        await msg.reply("Sizda tasdiqlanishi kerak boʻlgan vazifa topilmadi. Avval vazifani tanlang.")
+        return
+    ut_id = row["id"]
+    # get file_id
+    file_id = None
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+    elif msg.video:
+        file_id = msg.video.file_id
+    elif msg.document:
+        file_id = msg.document.file_id
+    cur.execute("UPDATE user_tasks SET proof_file_id = ?, status = ? WHERE id = ?", (file_id, "pending_review", ut_id))
+    conn.commit()
+    # forward proof to all admins with context buttons
+    text = f"Yangi vazifa proof (user: @{msg.from_user.username or msg.from_user.id} | id: {ut_id})."
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_task_approve:{ut_id}")],
+        [InlineKeyboardButton("❌ Bekor qilish", callback_data=f"admin_task_reject:{ut_id}")],
+    ])
+    for admin in ADMINS:
         try:
-            qty = int(message.text.strip())
-        except Exception:
-            await message.answer("Iltimos faqat raqam kiriting.")
-            return
-        session = users.get(uid, {}).get("session", {})
-        service_rate = float(session.get("rate", 0.0))
-        settings = get_settings()
-        percent = float(settings.get("percent", 0.0))
-        total_price = service_rate * qty * (1 + percent/100.0)
-        users[uid]["session"]["qty"] = qty
-        users[uid]["session"]["total_price"] = round(total_price, 2)
-        users[uid]["session"]["step"] = "await_confirm_order"
-        save_users(users)
-        # send confirmation
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Tasdiqlash va yuborish", callback_data="confirm_order")],
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_order")]
-        ])
-        await message.answer(
-            f"Buyurtma:\nXizmat: {session.get('service_name')}\nLink: {session.get('link')}\nMiqdor: {qty}\nNarx (foiz bilan): {round(total_price,2)} so'm\n\n✅ Tasdiqlaysizmi?",
-            reply_markup=kb
-        )
-        return
-    # --- DEPOSIT: awaiting amount ---
-    if step == "await_deposit_amount":
-        try:
-            amount = float(message.text.strip())
-        except Exception:
-            await message.answer("Iltimos raqam kiriting.")
-            return
-        dep_id = gen_id("DEP")
-        deposits = get_deposits()
-        deposits[dep_id] = {
-            "user_id": message.from_user.id,
-            "amount": amount,
-            "status": "pending",
-            "created_at": int(time.time()),
-            "proof": None
-        }
-        save_deposits(deposits)
-        # set session to awaiting proof
-        users[uid]["session"] = {"step": "await_deposit_proof", "dep_id": dep_id}
-        save_users(users)
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Toʻlov qildim (Yuborish)", callback_data=f"sent_deposit_{dep_id}")],
-            [InlineKeyboardButton(text="Bekor qilish", callback_data=f"cancel_deposit_{dep_id}")]
-        ])
-        await message.answer(f"Iltimos toʻlov chekini yuboring (rasm yoki skrin). Deposit ID: <code>{dep_id}</code>", reply_markup=kb)
-        return
-    # --- DEPOSIT: awaiting proof (user may send photo) ---
-    if step == "await_deposit_proof":
-        # Expecting photo or document with file_id
-        if not message.photo and not message.document:
-            await message.answer("Iltimos rasm yoki skrin yuboring.")
-            return
-        dep_id = session.get("dep_id")
-        if not dep_id:
-            await message.answer("Deposit topilmadi. Iltimos yana boshlang.")
-            users[uid]["session"] = {}
-            save_users(users)
-            return
-        file_id = None
-        if message.photo:
-            file_id = message.photo[-1].file_id
-        elif message.document:
-            file_id = message.document.file_id
-        deposits = get_deposits()
-        if dep_id not in deposits:
-            await message.answer("Deposit topilmadi.")
-            users[uid]["session"] = {}
-            save_users(users)
-            return
-        deposits[dep_id]["proof"] = file_id
-        deposits[dep_id]["status"] = "sent"
-        save_deposits(deposits)
-        users[uid]["session"] = {}
-        save_users(users)
-        await message.answer("✅ Chek yuborildi. Admin tasdiqlaydi. Sizga xabar keladi.")
-        # adminga xabar yuborish
-        try:
-            await bot.send_message(ADMIN_ID,
-                f"Yangi deposit so'rovi: {dep_id}\nFoydalanuvchi: {message.from_user.full_name} ({message.from_user.id})\nSumma: {deposits[dep_id]['amount']}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_dep_ok_{dep_id}"),
-                     InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"admin_dep_no_{dep_id}")]
-                ])
-            )
-        except Exception:
-            pass
-        return
-    # --- WITHDRAW request message (if any simple flow uses text) ---
-    if step == "await_withdraw_amount":
-        try:
-            amount = float(message.text.strip())
-        except Exception:
-            await message.answer("Iltimos raqam kiriting.")
-            return
-        # simple withdraw request: admin tasdiqlashi kerak
-        wd_id = gen_id("WD")
-        withdraws = get_withdraws()
-        withdraws[wd_id] = {
-            "user_id": message.from_user.id,
-            "amount": amount,
-            "status": "pending",
-            "created_at": int(time.time()),
-            "method": "manual"
-        }
-        save_withdraws(withdraws)
-        users[uid]["session"] = {}
-        save_users(users)
-        await message.answer(f"Pul yechish so'rovi qabul qilindi. ID: {wd_id}. Admin tasdiqlaydi.")
-        try:
-            await bot.send_message(ADMIN_ID, f"Yangi withdraw: {wd_id}\nFoydalanuvchi: {message.from_user.full_name} ({message.from_user.id})\nSumma: {amount}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_wd_ok_{wd_id}"),
-                     InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"admin_wd_no_{wd_id}")]
-                ]))
-        except Exception:
-            pass
-        return
+            # send as copy so admin can see
+            await bot.send_message(admin, text)
+            if file_id:
+                # send photo/video/document depending on type
+                if msg.photo:
+                    await bot.send_photo(admin, file_id, reply_markup=kb)
+                elif msg.video:
+                    await bot.send_video(admin, file_id, reply_markup=kb)
+                else:
+                    await bot.send_document(admin, file_id, reply_markup=kb)
+        except Exception as e:
+            logger.exception("Failed to forward to admin: %s", e)
+    await msg.reply("Proof yuborildi! Admin tasdiqlashini kuting.")
 
-    # Agar sessiya yo'q yoki mahalliy matn bo'lsa, salomlashish yoki boshqa mos xabar
-    # Agar foydalanuvchi oddiy matn yuborsa va hech qanday sessiya yo'q bo'lsa, ko'rsatma beramiz
-    await message.answer("Iltimos menyudan tanlang yoki /start buyrug'ini bering.")
-
-# Cancel order
-@dp.callback_query(lambda c: c.data == "cancel_order")
-async def cb_cancel_order(cq: CallbackQuery):
-    users = get_users()
-    uid = str(cq.from_user.id)
-    if uid in users:
-        users[uid]["session"] = {}
-        save_users(users)
-    await cq.message.answer("Buyurtma bekor qilindi.")
-    await cmd_start(cq.message)
-
-# Confirm order
-@dp.callback_query(lambda c: c.data == "confirm_order")
-async def cb_confirm_order(cq: CallbackQuery):
-    users = get_users()
-    uid = str(cq.from_user.id)
-    session = users.get(uid, {}).get("session")
-    if not session:
-        await cq.message.answer("Seans tugagan. Iltimos yana tanlang.")
+@dp.callback_query(Text(startswith="admin_task_approve:"))
+async def cb_admin_task_approve(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        await cq.answer("Bu admin komandasi.", show_alert=True)
         return
-    total_price = float(session.get("total_price", 0.0))
-    if get_balance(cq.from_user.id) < total_price:
-        await cq.message.answer(f"Balans yetarli emas. Sizda: {get_balance(cq.from_user.id)} so'm, kerak: {total_price} so'm.")
+    ut_id = int(cq.data.split(":")[1])
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM user_tasks WHERE id = ?", (ut_id,))
+    ut = cur.fetchone()
+    if not ut:
+        await cq.answer("Topilmadi.", show_alert=True)
         return
-    ok = sub_balance(cq.from_user.id, total_price)
-    if not ok:
-        await cq.message.answer("Balansdan yechilishda xatolik.")
-        return
-    svc_id = session.get("service_id")
-    link = session.get("link")
-    qty = int(session.get("qty"))
-    api_res = await create_order_api(svc_id, link, qty)
-    orders = get_orders()
-    order_id_local = gen_id("ORD")
-    orders[order_id_local] = {
-        "user_id": cq.from_user.id,
-        "service_id": svc_id,
-        "link": link,
-        "quantity": qty,
-        "total_price": total_price,
-        "status": "created",
-        "api_response": api_res,
-        "created_at": int(time.time())
-    }
-    if isinstance(api_res, dict) and api_res.get("order"):
-        orders[order_id_local]["api_order_id"] = api_res.get("order")
-    save_orders(orders)
-    users[uid]["session"] = {}
-    save_users(users)
-    await cq.message.answer(f"✅ Buyurtma qabul qilindi. Buyurtma ID: <code>{order_id_local}</code>\nBuyurtma holatini ko'rish uchun: /order {order_id_local}")
+    # give reward
+    cur.execute("SELECT reward FROM tasks WHERE id = ?", (ut["task_id"],))
+    t = cur.fetchone()
+    reward = float(t["reward"]) if t else 0.0
+    cur.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (reward, ut["user_id"]))
+    cur.execute("UPDATE user_tasks SET status = ? WHERE id = ?", ("approved", ut_id))
+    conn.commit()
+    conn.close()
+    await cq.answer("Tasdiqlandi.", show_alert=True)
     try:
-        await bot.send_message(ADMIN_ID, f"Yangi buyurtma: {order_id_local}\nFoydalanuvchi: {cq.from_user.full_name} ({cq.from_user.id})\nNarx: {total_price}")
+        await bot.send_message(ut["user_id"], f"🎉 Sizning vazifangiz tasdiqlandi! Hisobingizga {reward:.2f} so'm qo'shildi.")
     except Exception:
         pass
+    await cq.message.edit_text("Vazifa tasdiqlandi.")
 
-# /order command
-@dp.message(Command("order"))
-async def cmd_order_info(message: types.Message):
-    parts = message.text.split()
-    if len(parts) < 2:
-        await message.answer("❗ Buyurtma ID raqamini kiriting.\nMasalan: /order 12345")
+@dp.callback_query(Text(startswith="admin_task_reject:"))
+async def cb_admin_task_reject(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        await cq.answer("Bu admin komandasi.", show_alert=True)
         return
-
-    order_id = parts[1].strip()
-    orders = get_orders()
-
-    if order_id not in orders:
-        await message.answer("❌ Bunday ID bilan buyurtma topilmadi.")
+    ut_id = int(cq.data.split(":")[1])
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM user_tasks WHERE id = ?", (ut_id,))
+    ut = cur.fetchone()
+    if not ut:
+        await cq.answer("Topilmadi.", show_alert=True)
         return
+    cur.execute("UPDATE user_tasks SET status = ? WHERE id = ?", ("rejected", ut_id))
+    conn.commit()
+    conn.close()
+    await cq.answer("Bekor qilindi.", show_alert=True)
+    try:
+        await bot.send_message(ut["user_id"], "❌ Sizning vazifangiz bekor qilindi. Iltimos, qoidaga muvofiq qayta yuboring.")
+    except Exception:
+        pass
+    await cq.message.edit_text("Vazifa rad etildi.")
 
-    ord = orders[order_id]
-    text = (
-        f"🧾 Buyurtma ID: {order_id}\n"
-        f"📦 Xizmat ID: {ord.get('service_id')}\n"
-        f"🔗 Link: {ord.get('link')}\n"
-        f"📊 Miqdor: {ord.get('quantity')}\n"
-        f"💰 Narx: {ord.get('price')} so'm\n"
-        f"📅 Holat: {ord.get('status')}"
-    )
+# ---------- ADMIN: add task (simple flow using text) ----------
+@dp.callback_query(Text("admin_add_task"))
+async def cb_admin_add_task(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        await cq.answer("Siz admin emassiz.", show_alert=True)
+        return
+    await cq.message.answer("Vazifa qo'shish: Iltimos quyidagi formatda yuboring:\nTitle|Description|link(optional)|reward\nMasalan:\nKanalga obuna bo'lib screenshot yuboring|Kanalga a'zo bo'ling va screenshot yuboring|https://t.me/example|200")
+    await cq.answer()
 
-    await message.answer(text)
+@dp.message()
+async def catch_admin_task_text(msg: Message):
+    # Only handle if admin recently asked - simple approach: if admin and text contains '|'
+    if not is_admin(msg.from_user.id):
+        return
+    text = msg.text or ""
+    if "|" not in text:
+        return
+    parts = text.split("|")
+    if len(parts) < 3:
+        await msg.reply("Format noto'g'ri. Title|Description|link(optional)|reward")
+        return
+    title = parts[0].strip()
+    description = parts[1].strip()
+    link = parts[2].strip() if len(parts) >= 3 else ""
+    reward = float(parts[3].strip()) if len(parts) >= 4 and parts[3].strip().replace('.','',1).isdigit() else 0.0
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO tasks (title, description, link, reward) VALUES (?,?,?,?)", (title, description, link, reward))
+    conn.commit()
+    conn.close()
+    await msg.reply("Vazifa qo'shildi.")
+
+# ---------- BANKS (for deposits) ----------
+@dp.callback_query(Text("admin_add_bank"))
+async def cb_admin_add_bank(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        await cq.answer("Siz admin emassiz.", show_alert=True)
+        return
+    await cq.message.answer("Bank qo'shish: format: Bank nomi|karta raqami\nMasalan:\nXalq bank|8600************")
+    await cq.answer()
+
+@dp.message()
+async def catch_admin_bank_text(msg: Message):
+    if not is_admin(msg.from_user.id):
+        return
+    text = msg.text or ""
+    if "|" not in text:
+        return
+    name, card = [p.strip() for p in text.split("|", 1)]
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO banks (name, card) VALUES (?,?)", (name, card))
+    conn.commit()
+    conn.close()
+    await msg.reply("Bank qo'shildi.")
+
+# ---------- DEPOSIT FLOW ----------
+@dp.callback_query(Text("menu_deposit"))
+async def cb_menu_deposit(cq: CallbackQuery):
+    await cq.message.edit_text("To'ldirish uchun bankni tanlang:", reply_markup=deposit_banks_keyboard())
+
+@dp.callback_query(Text(startswith="deposit_bank:"))
+async def cb_deposit_bank(cq: CallbackQuery):
+    bank_id = int(cq.data.split(":")[1])
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT name, card FROM banks WHERE id = ?", (bank_id,))
+    b = cur.fetchone()
+    if not b:
+        await cq.answer("Bank topilmadi.", show_alert=True)
+        return
+    await cq.message.answer(f"To'lovni quyidagi karta raqamga amalga oshiring:\n\n{b['name']}\n{b['card']}\n\nTo'lov summasini kiriting (so'm):")
+    # save temporary state into settings with user id key
+    conn.close()
+    # store a simple state file keyed by user id
+    Path(f"state_deposit_{cq.from_user.id}.txt").write_text(str(bank_id))
+    await cq.answer()
+
+@dp.message()
+async def catch_deposit_amount(msg: Message):
+    # only if a deposit state file exists for this user
+    state_file = Path(f"state_deposit_{msg.from_user.id}.txt")
+    if not state_file.exists():
+        return
+    text = (msg.text or "").strip()
+    if not text.replace('.', '', 1).isdigit():
+        await msg.reply("Iltimos, raqam ko'rinishida miqdorni kiriting.")
+        return
+    amount = float(text)
+    bank_id = int(state_file.read_text())
+    state_file.unlink()
+    # create payment record with status 'awaiting'
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM banks WHERE id = ?", (bank_id,))
+    b = cur.fetchone()
+    bank_name = b["name"] if b else "Noma'lum"
+    cur.execute("INSERT INTO payments (user_id, amount, status, bank_name) VALUES (?,?,?,?)", (msg.from_user.id, amount, "awaiting", bank_name))
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    await msg.reply("To'lov uchun chek yoki skrin yuboring (rasm, document). Yuborganingizdan so'ng admin tasdiqlaydi.")
+    # store payment id in temporary file for receipt association
+    Path(f"state_payment_receipt_{msg.from_user.id}.txt").write_text(str(pid))
+
+@dp.message(lambda message: message.photo or message.document)
+async def catch_deposit_receipt(msg: Message):
+    state_file = Path(f"state_payment_receipt_{msg.from_user.id}.txt")
+    if not state_file.exists():
+        return
+    pid = int(state_file.read_text())
+    state_file.unlink()
+    file_id = None
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+    elif msg.document:
+        file_id = msg.document.file_id
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE payments SET receipt_file_id = ? WHERE id = ?", (file_id, pid))
+    conn.commit()
+    # notify admins
+    cur.execute("SELECT user_id, amount, bank_name FROM payments WHERE id = ?", (pid,))
+    p = cur.fetchone()
+    conn.close()
+    text = f"Yangi to'lov arizasi:\nUser: @{msg.from_user.username or msg.from_user.id}\nSumma: {p['amount']} so'm\nBank: {p['bank_name']}\nPayID: {pid
