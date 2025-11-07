@@ -13,7 +13,7 @@ from aiogram.types import (
 # 🔧 TOKEN VA ADMIN ID
 # ============================
 BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # Bot token
-ADMIN_ID =  7973934849                    # Admin ID (myidbot orqali top)
+ADMIN_ID = 7973934849                    # Admin ID (myidbot orqali top)
 
 # ============================
 # 🔧 FAYL YARATISH
