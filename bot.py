@@ -12,7 +12,7 @@ from aiogram.types import (
     InlineKeyboardMarkup
 )
 
-TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # ← bu yerga tokeningizni yozing
+TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # Tokenni shu yerga yoz
 ADMIN_ID = 7973934849
 
 bot = Bot(token=TOKEN)
@@ -24,6 +24,7 @@ if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
         json.dump({}, f)
 
+# ==== Fayl bilan ishlash funksiyalari ====
 def load_data():
     with open(DATA_FILE, "r") as f:
         return json.load(f)
@@ -53,6 +54,7 @@ def update_user(uid, key, value):
     data[str(uid)][key] = value
     save_data(data)
 
+# ==== Menyular ====
 def main_menu():
     buttons = [
         [KeyboardButton(text="💰 Balans"), KeyboardButton(text="🎮 O‘yin")],
@@ -61,6 +63,8 @@ def main_menu():
         [KeyboardButton(text="⚙️ Admin panel")]
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+# ==== START ====
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user = get_user(message.from_user.id)
@@ -72,6 +76,7 @@ async def start(message: types.Message):
         parse_mode="HTML"
     )
 
+# ==== BALANS ====
 @dp.message(F.text == "💰 Balans")
 async def balance(message: types.Message):
     user = get_user(message.from_user.id)
@@ -82,19 +87,28 @@ async def balance(message: types.Message):
         f"⭐ XP: {user['xp']} | Level: {user['level']}"
     )
 
+# ==== O‘YIN ====
 @dp.message(F.text == "🎮 O‘yin")
 async def game_start(message: types.Message):
+    user = get_user(message.from_user.id)
+    if user["balance"] < 200:
+        return await message.answer("❌ Pul yetarli emas! O‘yin o‘ynash uchun kamida 200 so‘m kerak.")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=str(i), callback_data=f"game_{i}") for i in range(1, 6)],
-        [InlineKeyboardButton(text=str(i), callback_data=f"game_{i}") for i in range(6, 11)]
+        [InlineKeyboardButton(text=str(i), callback_data=f"game_{i}") for i in range(1, 6)]
     ])
-    await message.answer("🎯 1 dan 10 gacha son tanlang:", reply_markup=keyboard)
+    await message.answer("🎯 1 dan 5 gacha son tanlang:", reply_markup=keyboard)
 
 @dp.callback_query(F.data.startswith("game_"))
 async def game_play(call: types.CallbackQuery):
     number = int(call.data.split("_")[1])
-    rand = random.randint(1, 10)
+    rand = random.randint(1, 5)
     user = get_user(call.from_user.id)
+
+    # Agar balansda pul yetmasa
+    if user["balance"] < 200:
+        await call.message.answer("❌ Pul yetarli emas! O‘yin o‘ynash uchun kamida 200 so‘m kerak.")
+        return await call.answer()
+
     text = ""
     if number == rand:
         user["balance"] += 500
@@ -104,10 +118,13 @@ async def game_play(call: types.CallbackQuery):
     else:
         user["balance"] -= 200
         text = f"😢 Afsus, raqam {rand} edi. −200 so‘m"
+
     user["games"] += 1
+
     if user["xp"] >= user["level"] * 100:
         user["level"] += 1
         text += f"\n🏅 Tabriklaymiz! Siz {user['level']} darajaga chiqdingiz!"
+
     update_user(call.from_user.id, "balance", user["balance"])
     update_user(call.from_user.id, "xp", user["xp"])
     update_user(call.from_user.id, "level", user["level"])
@@ -116,6 +133,7 @@ async def game_play(call: types.CallbackQuery):
     await call.message.answer(text)
     await call.answer()
 
+# ==== BONUS ====
 @dp.message(F.text == "🎁 Bonus")
 async def bonus(message: types.Message):
     user = get_user(message.from_user.id)
@@ -131,6 +149,7 @@ async def bonus(message: types.Message):
     update_user(message.from_user.id, "bonus_time", user["bonus_time"])
     await message.answer("🎁 500 so‘m bonus qo‘shildi!")
 
+# ==== INVEST ====
 @dp.message(F.text == "🏦 Invest")
 async def invest(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -163,6 +182,7 @@ async def invest_action(call: types.CallbackQuery):
     await call.message.answer(f"💰 Sarmoya yakunlandi! Sizga {profit} so‘m foyda qo‘shildi.")
     await call.answer()
 
+# ==== STATISTIKA ====
 @dp.message(F.text == "📊 Statistika")
 async def stats(message: types.Message):
     user = get_user(message.from_user.id)
@@ -174,11 +194,13 @@ async def stats(message: types.Message):
         f"⭐ XP: {user['xp']} | Level: {user['level']}"
     )
 
+# ==== REFERAL ====
 @dp.message(F.text == "👥 Referal")
 async def referal(message: types.Message):
     link = f"https://t.me/{(await bot.get_me()).username}?start={message.from_user.id}"
     await message.answer(f"👥 Do‘stlaringizni taklif qiling va 5% bonus oling!\n\n🔗 Havola: {link}")
 
+# ==== ADMIN PANEL ====
 @dp.message(F.text == "⚙️ Admin panel")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -207,6 +229,7 @@ async def admin_stats(call: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(call: types.CallbackQuery):
     await call.message.answer("✍️ Hammaga yuboriladigan xabarni yozing:")
+
     @dp.message()
     async def broadcast_msg(msg: types.Message):
         data = load_data()
@@ -218,6 +241,7 @@ async def admin_broadcast(call: types.CallbackQuery):
         await msg.answer("✅ Xabar yuborildi.")
         dp.message.handlers.unregister(broadcast_msg)
 
+# ==== Bosh ====
 async def main():
     print("🚀 Bot ishga tushdi...")
     await dp.start_polling(bot)
