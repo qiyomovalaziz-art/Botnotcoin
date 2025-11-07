@@ -55,13 +55,12 @@ def update_user(uid, key, value):
 
 def main_menu():
     buttons = [
-        [KeyboardButton("💰 Balans"), KeyboardButton("🎮 O‘yin")],
-        [KeyboardButton("🏦 Invest"), KeyboardButton("🎁 Bonus")],
-        [KeyboardButton("👥 Referal"), KeyboardButton("📊 Statistika")],
-        [KeyboardButton("⚙️ Admin panel")]
+        [KeyboardButton(text="💰 Balans"), KeyboardButton(text="🎮 O‘yin")],
+        [KeyboardButton(text="🏦 Invest"), KeyboardButton(text="🎁 Bonus")],
+        [KeyboardButton(text="👥 Referal"), KeyboardButton(text="📊 Statistika")],
+        [KeyboardButton(text="⚙️ Admin panel")]
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user = get_user(message.from_user.id)
