@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # 🔹 Token va admin ID
-BOT_TOKEN = "BOT_TOKENINGNI_BU_YERGA_QO'Y"  # Token shu yerga
+BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"  # Token shu yerga
 ADMIN_ID = 123456789  # Admin ID shu yerga
 
 # 🔹 Log
