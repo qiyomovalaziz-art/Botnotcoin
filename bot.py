@@ -40,7 +40,6 @@ def save_payments(data):
     with open(PAYMENT_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# === Asosiy menyu ===
 def main_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("💳 Pul yechish"), KeyboardButton("💰 Pul ishlash"))
@@ -74,38 +73,14 @@ async def start_cmd(message: types.Message):
         f"💵 Kiritilgan pullar: {users[user_id]['kiritilgan']} so‘m\n\n"
         f"@Your_Bot_Username Official 2025"
     )
-
-    await message.answer(text, reply_markup=main_menu())
-
-# === Pul yechish ===
-@dp.message(F.text == "💳 Pul yechish")
-async def withdraw_money(message: types.Message):
-    users = load_data()
-    user_id = str(message.from_user.id)
-    if user_id not in users:
-        await message.answer("❌ Avval /start buyrug‘ini bering!")
-        return
-
-    await message.answer(
-        f"💸 Pul yechish uchun tizim tanlang:\n"
-        f"To‘lov tizimlari:\n"
-        + "\n".join(load_payments() or ["Hech narsa qo‘shilmagan!"])
-    )
-
-# === Hisobni to‘ldirish ===
-@dp.message(F.text == "💸 Hisobni to‘ldirish")
-async def deposit_money(message: types.Message):
-    await message.answer("💵 Hisobni to‘ldirish uchun to‘lov tizimini tanlang.\n(Admin tomonidan tizim qo‘shiladi).")
-
-# === Pul ishlash ===
-@dp.message(F.text == "💰 Pul ishlash")
-async def earn_money(message: types.Message):
-    await message.answer("💼 Pul ishlash bo‘limi tez orada ishga tushadi!")
-
-# === Investitsiya ===
-@dp.message(F.text == "🏦 Investitsiya")
-async def invest_menu(message: types.Message):
-    await message.answer("📈 Investitsiya funksiyasi hozircha ishlab chiqilmoqda.")
+def main_menu():
+    buttons = [
+        [KeyboardButton(text="💳 Pul yechish"), KeyboardButton(text="💰 Pul ishlash")],
+        [KeyboardButton(text="💸 Hisobni to‘ldirish"), KeyboardButton(text="🏦 Investitsiya")],
+        [KeyboardButton(text="⚙️ Boshqaruv")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    
 
 # === Admin panel ===
 @dp.message(F.text == "⚙️ Boshqaruv")
