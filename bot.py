@@ -1,269 +1,153 @@
-# bot.py
-import os
-import json
 import asyncio
-from typing import List, Dict, Any, Optional
-
-from aiogram import Bot, Dispatcher, types
+import json
+import os
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import (
-    InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-)
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 
-DATA_FILE = "data.json"
-BOT_TOKEN = ("8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM")  # yoki to'g'ridan-to'g'ri yozing (xavfsizlik uchun env tavsiya)
+# === Sozlamalar ===
+BOT_TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"
 ADMIN_ID = 7973934849
+DATA_FILE = "users.json"
+PAYMENT_FILE = "payments.json"
 
-if BOT_TOKEN is None or ADMIN_ID == 0:
-    raise SystemExit("Iltimos, TG_BOT_TOKEN va ADMIN_ID muhit o'zgaruvchilarini sozlang.")
+# === Fayllarni tayyorlash ===
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({}, f)
 
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher(storage=MemoryStorage())
+if not os.path.exists(PAYMENT_FILE):
+    with open(PAYMENT_FILE, "w") as f:
+        json.dump([], f)
 
-# --- Yengil JSON saqlovchi ---
-def load_data() -> Dict[str, Any]:
-    if not os.path.exists(DATA_FILE):
-        return {"required_channels": [], "orders": []}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# === Ma'lumotlarni o‘qish va yozish funksiyalari ===
+def load_data():
+    with open(DATA_FILE, "r") as f:
         return json.load(f)
 
-def save_data(d: Dict[str, Any]):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-data = load_data()
+def load_payments():
+    with open(PAYMENT_FILE, "r") as f:
+        return json.load(f)
 
-# --- FSM for ordering ---
-class OrderStates(StatesGroup):
-    waiting_name = State()
-    waiting_service = State()
-    waiting_amount = State()
-    waiting_confirm = State()
+def save_payments(data):
+    with open(PAYMENT_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-# --- Helpers ---
-def admin_only(func):
-    async def wrapper(event, *a, **kw):
-        user_id = (event.from_user.id if isinstance(event, Message) else event.from_user.id)
-        if user_id != ADMIN_ID:
-            if isinstance(event, Message):
-                await event.reply("Siz bu komandani ishlata olmaysiz.")
-            else:
-                await event.message.answer("Siz bu komandani ishlata olmaysiz.")
-            return
-        return await func(event, *a, **kw)
-    return wrapper
-
-def make_start_kbd() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardButton("🔎 Obunani tekshirish", callback_data="check_subs"))
-    kb.add(InlineKeyboardButton("🛒 Buyurtma berish", callback_data="order"))
-    kb.add(InlineKeyboardButton("📸 Instagram", url="https://instagram.com/your_instagram_here"))
+# === Asosiy menyu ===
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("💳 Pul yechish"), KeyboardButton("💰 Pul ishlash"))
+    kb.add(KeyboardButton("💸 Hisobni to‘ldirish"), KeyboardButton("🏦 Investitsiya"))
+    kb.add(KeyboardButton("⚙️ Boshqaruv"))
     return kb
 
-# --- Commands ---
-@dp.message(Command(commands=["start"]))
-async def cmd_start(message: Message):
-    d = load_data()
-    channels: List[str] = d.get("required_channels", [])
-    if channels:
-        text = "Botga xush kelibsiz!\nQuyidagi kanallarga obuna bo'lishingiz kerak:"
-        for ch in channels:
-            text += f"\n• {ch}"
-    else:
-        text = "Botga xush kelibsiz!\nHozircha majburiy kanallar belgilanmagan."
-    await message.answer(text, reply_markup=make_start_kbd())
+# === Start komandasi ===
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    users = load_data()
+    user_id = str(message.from_user.id)
 
-# --- Admin: add channel ---
-@dp.message(Command(commands=["add_channel"]))
-@admin_only
-async def cmd_add_channel(message: Message):
-    await message.reply("Kanal username yoki invite linkini yuboring (masalan: @kanal yoki https://t.me/joinchat/...).\nYuborganingizdan so'ng men uni majburiylar ro'yxatiga qo'shaman.")
-    # next message will be processed by simple handler below with a special prefix check
-    # We'll mark by expecting next message to be a channel add — simplified approach:
-    await message.bot.set_my_commands([])  # noop to avoid warnings
+    if user_id not in users:
+        users[user_id] = {
+            "id": message.from_user.id,
+            "balans": 0,
+            "sarmoya": 0,
+            "takliflar": 0,
+            "kiritilgan": 0
+        }
+        save_data(users)
 
-@dp.message()
-async def catch_admin_channel_add(message: Message):
-    # only admin messages here will act as channel additions if they start with @ or https
+    text = (
+        f"🏦 Assalomu alaykum {message.from_user.first_name}!\n\n"
+        f"Sizning botdagi hisobingiz:\n"
+        f"🆔 ID: {user_id}\n"
+        f"💰 Asosiy balans: {users[user_id]['balans']} so‘m\n"
+        f"📊 Sarmoya: {users[user_id]['sarmoya']} so‘m\n"
+        f"👥 Takliflaringiz: {users[user_id]['takliflar']} ta\n"
+        f"💵 Kiritilgan pullar: {users[user_id]['kiritilgan']} so‘m\n\n"
+        f"@Your_Bot_Username Official 2025"
+    )
+
+    await message.answer(text, reply_markup=main_menu())
+
+# === Pul yechish ===
+@dp.message(F.text == "💳 Pul yechish")
+async def withdraw_money(message: types.Message):
+    users = load_data()
+    user_id = str(message.from_user.id)
+    if user_id not in users:
+        await message.answer("❌ Avval /start buyrug‘ini bering!")
+        return
+
+    await message.answer(
+        f"💸 Pul yechish uchun tizim tanlang:\n"
+        f"To‘lov tizimlari:\n"
+        + "\n".join(load_payments() or ["Hech narsa qo‘shilmagan!"])
+    )
+
+# === Hisobni to‘ldirish ===
+@dp.message(F.text == "💸 Hisobni to‘ldirish")
+async def deposit_money(message: types.Message):
+    await message.answer("💵 Hisobni to‘ldirish uchun to‘lov tizimini tanlang.\n(Admin tomonidan tizim qo‘shiladi).")
+
+# === Pul ishlash ===
+@dp.message(F.text == "💰 Pul ishlash")
+async def earn_money(message: types.Message):
+    await message.answer("💼 Pul ishlash bo‘limi tez orada ishga tushadi!")
+
+# === Investitsiya ===
+@dp.message(F.text == "🏦 Investitsiya")
+async def invest_menu(message: types.Message):
+    await message.answer("📈 Investitsiya funksiyasi hozircha ishlab chiqilmoqda.")
+
+# === Admin panel ===
+@dp.message(F.text == "⚙️ Boshqaruv")
+async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        # Not admin — maybe user is ordering; let FSM handle
+        await message.answer("❌ Siz admin emassiz!")
         return
-    text = message.text.strip()
-    if text.startswith("@") or text.startswith("http"):
-        d = load_data()
-        channels = d.get("required_channels", [])
-        if text in channels:
-            await message.reply("Bu kanal allaqachon ro'yxatda.")
-            return
-        channels.append(text)
-        d["required_channels"] = channels
-        save_data(d)
-        await message.reply(f"Kanal qo'shildi: {text}")
-    # else: ignore (could be normal admin message)
 
-@dp.message(Command(commands=["remove_channel"]))
-@admin_only
-async def cmd_remove_channel(message: Message):
-    d = load_data()
-    channels = d.get("required_channels", [])
-    if not channels:
-        await message.reply("Hech qanday majburiy kanal mavjud emas.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ To‘lov tizimi qo‘shish", callback_data="add_pay")],
+        [InlineKeyboardButton(text="📄 To‘lov tizimlarini ko‘rish", callback_data="view_pay")],
+    ])
+    await message.answer("⚙️ Admin panel:", reply_markup=kb)
+
+# === Callbacklar ===
+@dp.callback_query(F.data == "add_pay")
+async def add_payment(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
         return
-    kb = InlineKeyboardMarkup(row_width=1)
-    for ch in channels:
-        kb.add(InlineKeyboardButton(ch, callback_data=f"rmch|{ch}"))
-    await message.reply("O'chirmoqchi bo'lgan kanalni tanlang:", reply_markup=kb)
+    await callback.message.answer("📝 Yangi to‘lov tizimi nomini yuboring:")
+    await callback.answer()
+    dp.message.register(save_payment_name)
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("rmch|"))
-@admin_only
-async def cb_remove_channel(query: CallbackQuery):
-    _, ch = query.data.split("|", 1)
-    d = load_data()
-    channels = d.get("required_channels", [])
-    if ch in channels:
-        channels.remove(ch)
-        d["required_channels"] = channels
-        save_data(d)
-        await query.message.edit_text("Kanal o'chirildi.")
+async def save_payment_name(message: types.Message):
+    payments = load_payments()
+    payments.append(message.text)
+    save_payments(payments)
+    await message.answer(f"✅ '{message.text}' tizimi qo‘shildi!")
+
+@dp.callback_query(F.data == "view_pay")
+async def view_payments(callback: types.CallbackQuery):
+    payments = load_payments()
+    if not payments:
+        await callback.message.answer("⚠️ Hozircha to‘lov tizimi yo‘q.")
     else:
-        await query.answer("Topilmadi.", show_alert=True)
+        await callback.message.answer("💳 To‘lov tizimlari:\n" + "\n".join(payments))
+    await callback.answer()
 
-@dp.message(Command(commands=["list_channels"]))
-@admin_only
-async def cmd_list_channels(message: Message):
-    d = load_data()
-    channels = d.get("required_channels", [])
-    if not channels:
-        await message.reply("Majburiy kanallar ro'yxati bo'sh.")
-        return
-    text = "Majburiy kanallar:\n" + "\n".join(f"• {c}" for c in channels)
-    await message.reply(text)
+# === Ishga tushirish ===
+async def main():
+    print("Bot ishga tushdi ✅")
+    await dp.start_polling(bot)
 
-# --- Subscription check ---
-@dp.callback_query(lambda c: c.data == "check_subs")
-async def cb_check_subs(query: CallbackQuery):
-    user_id = query.from_user.id
-    d = load_data()
-    channels: List[str] = d.get("required_channels", [])
-    if not channels:
-        await query.message.answer("Majburiy kanallar belgilangan emas. Admin bilan bog'laning.")
-        return
-    not_joined = []
-    for ch in channels:
-        try:
-            # If ch looks like @username, we can use it; if it's a join link, bot can't always check — notify admin.
-            if ch.startswith("@"):
-                chat = await bot.get_chat(ch)
-                member = await bot.get_chat_member(chat.id, user_id)
-                status = member.status  # 'member', 'creator', 'administrator', etc.
-                if status in ("left", "kicked"):
-                    not_joined.append(ch)
-            else:
-                # invite link or weird format — we can't reliably check via username,
-                # so we consider it unchecked and instruct user to join manually.
-                not_joined.append(ch + " (invite-link — qo'shiling va keyin tekshiring)")
-        except Exception as e:
-            # Agar bot kanalga admin emas yoki username noto'g'ri bo'lsa
-            not_joined.append(f"{ch} (tekshirishda xato)")
-    if not not_joined:
-        await query.message.answer("Siz barcha majburiy kanallarga obuna ekansiz ✅")
-    else:
-        text = "Iltimos quyidagi kanallarga obuna bo'ling yoki adminga murojaat qiling:\n" + "\n".join(f"• {c}" for c in not_joined)
-        await query.message.answer(text)
-
-# --- Ordering flow ---
-@dp.callback_query(lambda c: c.data == "order")
-async def cb_order_start(query: CallbackQuery):
-    await query.message.answer("Buyurtma berish: Ismingizni kiriting:")
-    await dp.current_state(user=query.from_user.id).set_state(OrderStates.waiting_name)
-
-@dp.message(OrderStates.waiting_name)
-async def state_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await message.answer("Xizmat nomini kiriting (masalan: Instagram follower):")
-    await state.set_state(OrderStates.waiting_service)
-
-@dp.message(OrderStates.waiting_service)
-async def state_service(message: Message, state: FSMContext):
-    await state.update_data(service=message.text.strip())
-    await message.answer("Miqdorni kiriting (raqam bilan):")
-    await state.set_state(OrderStates.waiting_amount)
-
-@dp.message(OrderStates.waiting_amount)
-async def state_amount(message: Message, state: FSMContext):
-    txt = message.text.strip()
-    if not txt.isdigit():
-        await message.answer("Iltimos faqat raqam kiriting.")
-        return
-    await state.update_data(amount=int(txt))
-    data_st = await state.get_data()
-    summary = (
-        f"Buyurtma xulosasi:\n"
-        f"Ism: {data_st['name']}\n"
-        f"Xizmat: {data_st['service']}\n"
-        f"Miqdor: {data_st['amount']}\n\n"
-        "Tasdiqlaysizmi?"
-    )
-    kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✅ Tasdiqlash", callback_data="order_confirm"),
-        InlineKeyboardButton("❌ Bekor qilish", callback_data="order_cancel"),
-    )
-    await message.answer(summary, reply_markup=kb)
-    await state.set_state(OrderStates.waiting_confirm)
-
-@dp.callback_query(lambda c: c.data == "order_confirm")
-async def cb_order_confirm(query: CallbackQuery):
-    state = dp.current_state(user=query.from_user.id)
-    d = await state.get_data()
-    store = load_data()
-    order = {
-        "user_id": query.from_user.id,
-        "user_name": query.from_user.username or query.from_user.full_name,
-        "name": d.get("name"),
-        "service": d.get("service"),
-        "amount": d.get("amount"),
-        "status": "new"
-    }
-    store.setdefault("orders", []).append(order)
-    save_data(store)
-    await state.clear()
-    await query.message.answer("Buyurtmangiz qabul qilindi. Admin bilan bog'laning yoki to'lovni amalga oshiring.")
-    # notify admin
-    try:
-        await bot.send_message(ADMIN_ID, f"Yangi buyurtma:\n{order}")
-    except Exception:
-        pass
-
-@dp.callback_query(lambda c: c.data == "order_cancel")
-async def cb_order_cancel(query: CallbackQuery):
-    await dp.current_state(user=query.from_user.id).clear()
-    await query.message.answer("Buyurtma bekor qilindi.")
-
-# --- Admin: view orders ---
-@dp.message(Command(commands=["orders"]))
-@admin_only
-async def cmd_orders(message: Message):
-    d = load_data()
-    orders = d.get("orders", [])
-    if not orders:
-        await message.reply("Buyurtmalar yo'q.")
-        return
-    for o in orders[-20:]:
-        await message.reply(json.dumps(o, ensure_ascii=False, indent=2))
-
-# --- Fallback handler for plain text from users (non-admin) ---
-@dp.message()
-async def default_msg(message: Message):
-    # If user writes something unexpected, show start keyboard
-    await message.reply("Bot asosiy menyu:", reply_markup=make_start_kbd())
-
-# --- Run ---
 if __name__ == "__main__":
-    print("Bot ishga tushmoqda...")
-    try:
-        dp.run_polling(bot)
-    finally:
-        save_data(load_data())
+    asyncio.run(main())
