@@ -18,8 +18,8 @@ from aiogram.types import (
 )
 
 # ---------- CONFIG ----------
-TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
-ADMINS = [123456789]  # list of admin Telegram user IDs (integers)
+TOKEN = "8379130776:AAFP_ZIt1T2ds_p5vBILyFzvj8RaKeIDLRM"
+ADMINS = [7973934849]  # list of admin Telegram user IDs (integers)
 
 DB_PATH = "bot_data.db"
 REQUIRED_CHANNELS_TABLE = "required_channels"  # table name reference
