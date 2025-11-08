@@ -1,4 +1,3 @@
-pyTelegramBotAPI
+python-telegram-bot==20.*
 yt-dlp
-youtube-search-python
-ffmpeg-python
+requests
