@@ -9,7 +9,7 @@ from aiogram.types import (
 from pathlib import Path
 
 # ⚙️ Sozlamalar
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN = "8395937326:AAHdugyvBwwTkoM5sFsK3Gu3WrV30TPTSTc"
 ADMIN_ID = 7973934849
 PAYMENT_PROVIDER_TOKEN = "YOUR_PAYMENT_PROVIDER_TOKEN"  # @BotFather dan olingan token
 BOT_USERNAME = "StarstUZBbot"
