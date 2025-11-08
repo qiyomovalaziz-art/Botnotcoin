@@ -1,5 +1,5 @@
 [build]
-builder = "Docker"
+builder = "DOCKERFILE"
 
 [deploy]
-restart_policy = "always"
+startCommand = "python bot.py"
