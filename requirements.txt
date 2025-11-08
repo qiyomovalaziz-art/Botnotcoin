@@ -1,4 +1,3 @@
-aiogram==3.1.2        # Telegram bot API uchun asosiy kutubxona
-aiohttp==3.9.5        # HTTP so‘rovlar va bot polling uchun
-aiogram[fast]         # Aiogram’ning tez ishlash varianti (asyncio optimizatsiyasi)
-python-dotenv==1.0.0  # .env fayl orqali tokenlarni saqlash uchun (ixtiyoriy)
+aiogram==3.1.2        # Telegram bot API uchun
+aiohttp==3.9.5        # HTTP so‘rovlar va polling uchun
+python-dotenv==1.0.0  # Token va maxfiy parametrlarni .env fayl orqali saqlash uchun
