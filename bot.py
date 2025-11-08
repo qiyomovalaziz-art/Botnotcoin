@@ -1,96 +1,79 @@
 import telebot
 import os
-import sqlite3
 import yt_dlp
-
-from telebot import types
-from config import BOT_TOKEN, ADMIN_ID
+from config import BOT_TOKEN
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ====== DATABASE ======
-if not os.path.exists("users.db"):
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
-    conn.commit()
-    conn.close()
-
-# ====== START ======
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_id = message.chat.id
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
-    bot.send_message(message.chat.id, "🎬 Salom! Menga Instagram, YouTube yoki TikTok link yuboring — men sizga video yoki musiqani yuboraman 🎵")
+    bot.reply_to(message, "🎬 Salom! Menga YouTube, TikTok yoki Instagram link yuboring.\nMen sizga video va audio qilib yuboraman 🎵")
 
-# ====== ADMIN PANEL ======
-@bot.message_handler(commands=['admin'])
-def admin_panel(message):
-    if message.chat.id != ADMIN_ID:
-        return
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📊 Statistika", "📢 Xabar yuborish")
-    bot.send_message(message.chat.id, "Admin panel:", reply_markup=markup)
-
-@bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.chat.id == ADMIN_ID)
-def stats(message):
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM users")
-    count = cur.fetchone()[0]
-    conn.close()
-    bot.send_message(message.chat.id, f"👥 Jami foydalanuvchilar: {count} ta")
-
-@bot.message_handler(func=lambda m: m.text == "📢 Xabar yuborish" and m.chat.id == ADMIN_ID)
-def broadcast_start(message):
-    bot.send_message(message.chat.id, "Yubormoqchi bo'lgan xabarni kiriting:")
-    bot.register_next_step_handler(message, broadcast_message)
-
-def broadcast_message(message):
-    text = message.text
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM users")
-    users = cur.fetchall()
-    conn.close()
-    sent = 0
-    for user in users:
-        try:
-            bot.send_message(user[0], text)
-            sent += 1
-        except:
-            pass
-    bot.send_message(ADMIN_ID, f"✅ {sent} ta foydalanuvchiga yuborildi.")
-
-# ====== LINK QABUL QILISH ======
-@bot.message_handler(func=lambda message: message.text.startswith("http"))
-def download_video(message):
+@bot.message_handler(func=lambda message: True)
+def download_media(message):
     url = message.text.strip()
-    msg = bot.reply_to(message, "⏳ Yuklanmoqda, biroz kuting...")
 
-    ydl_opts = {
-        'outtmpl': 'video.%(ext)s',
-        'format': 'mp4',
-        'quiet': True,
-        'merge_output_format': 'mp4'
-    }
+    # Link to'g'riligini tekshirish
+    if not (url.startswith("http://") or url.startswith("https://")):
+        bot.reply_to(message, "❗ Iltimos, to‘g‘ri video link yuboring.")
+        return
+
+    msg = bot.reply_to(message, "⏳ Yuklab olinmoqda, biroz kuting...")
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Video yuklab olish sozlamalari
+        video_opts = {
+            'format': 'best',
+            'outtmpl': 'video.%(ext)s',
+            'quiet': True
+        }
+
+        # Video yuklab olish
+        with yt_dlp.YoutubeDL(video_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            file_name = ydl.prepare_filename(info)
+            video_file = ydl.prepare_filename(info)
 
-        with open(file_name, 'rb') as video:
-            bot.send_video(message.chat.id, video)
+        # Audio yuklab olish sozlamalari
+        audio_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'audio.%(ext)s',
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
 
-        os.remove(file_name)
+        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+            ydl.extract_info(url, download=True)
+
+        # Video yuborish
+        with open(video_file, 'rb') as vid:
+            bot.send_video(message.chat.id, vid, caption="🎥 Mana videongiz!")
+
+        # Audio fayl topish
+        audio_file = None
+        for file in os.listdir():
+            if file.endswith(".mp3"):
+                audio_file = file
+                break
+
+        # Audio yuborish
+        if audio_file:
+            with open(audio_file, 'rb') as aud:
+                bot.send_audio(message.chat.id, aud, caption="🎧 Mana audiosi!")
+            os.remove(audio_file)
+
+        # Link xabarini o‘chirish
+        bot.delete_message(message.chat.id, message.message_id)
         bot.delete_message(message.chat.id, msg.message_id)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Xatolik: {e}")
 
-# ====== RUN BOT ======
-bot.infinity_polling()
+        # Ortiqcha fayllarni o‘chirish
+        if os.path.exists(video_file):
+            os.remove(video_file)
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ Xatolik: {str(e)}", message.chat.id, msg.message_id)
+
+bot.polling(non_stop=True)
