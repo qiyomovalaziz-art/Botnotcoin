@@ -4,7 +4,7 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
-BOT_TOKEN = "8053267322:AAHp65zXTZn_ZQswyLyjIc5e7bZnxogx9wM"
+BOT_TOKEN = "8347087773:AAFuMVzJIdPxg-iujpOXLw_Zb-CnBG5PcTw"
 
 # --- Video yuklab olish funksiyasi ---
 def download_video(url):
