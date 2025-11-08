@@ -1,48 +1,66 @@
 import telebot
 import os
 import yt_dlp
+from youtubesearchpython import VideosSearch
 from config import BOT_TOKEN
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(
-        message,
-        "🎬 Salom! Menga YouTube, TikTok yoki Instagram link yuboring.\n"
-        "Men sizga video va audio qilib yuboraman 🎵"
-    )
+    bot.reply_to(message,
+                 "🎬 Salom! Men sizga yordam bera olaman:\n\n"
+                 "🎵 Musiqa nomini yozing — men topib video va mp3 qilib yuboraman.\n"
+                 "🎥 Kino yoki multfilm nomini yozing — YouTube treylerini yuboraman.\n"
+                 "📎 Yoki Instagram, TikTok, YouTube link yuboring — men videoni yuklab yuboraman.")
 
 @bot.message_handler(func=lambda message: True)
-def download_media(message):
-    url = message.text.strip()
+def handle_message(message):
+    text = message.text.strip()
 
-    # Link to‘g‘riligini tekshirish
-    if not (url.startswith("http://") or url.startswith("https://")):
-        bot.reply_to(message, "❗ Iltimos, to‘g‘ri video link yuboring.")
+    # link tekshirish
+    if text.startswith("http://") or text.startswith("https://"):
+        return download_video(message, text)
+
+    # nom bo‘yicha qidirish
+    search = VideosSearch(text, limit=1)
+    results = search.result()
+
+    if not results or len(results['result']) == 0:
+        bot.reply_to(message, "❌ Hech narsa topilmadi. Iltimos, boshqa nom kiriting.")
         return
 
-    msg = bot.reply_to(message, "⏳ Yuklab olinmoqda, biroz kuting...")
+    video = results['result'][0]
+    video_title = video['title']
+    video_url = video['link']
+    thumbnail = video['thumbnails'][0]['url']
+
+    caption = f"🎬 <b>{video_title}</b>\n🔗 {video_url}"
+    bot.send_photo(message.chat.id, thumbnail, caption=caption, parse_mode="HTML")
+
+    # YouTube dan video va audio yuklash
+    download_video(message, video_url)
+
+def download_video(message, url):
+    msg = bot.reply_to(message, "⏳ Yuklab olinmoqda...")
 
     try:
-        # === Video yuklab olish ===
         video_opts = {
             'format': 'best',
             'outtmpl': 'video.%(ext)s',
             'quiet': True,
-            'noplaylist': True,
         }
 
         with yt_dlp.YoutubeDL(video_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             video_file = ydl.prepare_filename(info)
+            title = info.get("title", "Noma'lum video")
 
-        # === Audio yuklab olish ===
+        # audio yuklash
         audio_opts = {
             'format': 'bestaudio/best',
             'outtmpl': 'audio.%(ext)s',
             'quiet': True,
-            'noplaylist': True,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -53,49 +71,25 @@ def download_media(message):
         with yt_dlp.YoutubeDL(audio_opts) as ydl:
             ydl.extract_info(url, download=True)
 
-        # === Fayl nomini tayyorlash ===
-        title = info.get("title", "Noma’lum nom")
-        artist = info.get("uploader", "Noma’lum ijrochi")
-
-        # === Video yuborish ===
+        # video yuborish
         with open(video_file, 'rb') as vid:
-            bot.send_video(
-                message.chat.id,
-                vid,
-                caption=f"🎥 *{title}*\n👤 {artist}",
-                parse_mode='Markdown'
-            )
+            bot.send_video(message.chat.id, vid, caption=f"🎥 {title}")
 
-        # === Audio faylni topish ===
-        audio_file = None
+        # audio yuborish
         for file in os.listdir():
             if file.endswith(".mp3"):
-                audio_file = file
+                with open(file, 'rb') as aud:
+                    bot.send_audio(message.chat.id, aud, caption=f"🎧 {title}")
+                os.remove(file)
                 break
 
-        # === Audio yuborish ===
-        if audio_file:
-            with open(audio_file, 'rb') as aud:
-                bot.send_audio(
-                    message.chat.id,
-                    aud,
-                    caption=f"🎧 {artist} - {title}"
-                )
-            os.remove(audio_file)
-
-        # === Yuborilgan linkni o‘chirish ===
-        bot.delete_message(message.chat.id, message.message_id)
-        bot.delete_message(message.chat.id, msg.message_id)
-
-        # === Ortiqcha fayllarni o‘chirish ===
+        # fayllarni tozalash
         if os.path.exists(video_file):
             os.remove(video_file)
 
+        bot.delete_message(message.chat.id, msg.message_id)
+
     except Exception as e:
-        bot.edit_message_text(
-            f"❌ Xatolik: {str(e)}",
-            message.chat.id,
-            msg.message_id
-        )
+        bot.edit_message_text(f"❌ Xatolik: {str(e)}", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
