@@ -1,3 +1,4 @@
 pyTelegramBotAPI
 yt-dlp
+youtube-search-python
 ffmpeg-python
