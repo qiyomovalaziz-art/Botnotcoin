@@ -1,4 +1,4 @@
-# config.py
-BOT_TOKEN =
-"8347087773:AAFuMVzJIdPxg-iujpOXLw_Zb-CnBG5PcTw"
-ADMIN_ID = 123456789  # o'z Telegram ID raqamingizni kiriting
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
