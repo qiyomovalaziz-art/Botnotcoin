@@ -1,7 +1,6 @@
 import telebot
 import os
 import yt_dlp
-from youtubesearchpython import VideosSearch
 from config import BOT_TOKEN
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -9,58 +8,93 @@ bot = telebot.TeleBot(BOT_TOKEN)
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message,
-                 "🎬 Salom! Men sizga yordam bera olaman:\n\n"
-                 "🎵 Musiqa nomini yozing — men topib video va mp3 qilib yuboraman.\n"
-                 "🎥 Kino yoki multfilm nomini yozing — YouTube treylerini yuboraman.\n"
-                 "📎 Yoki Instagram, TikTok, YouTube link yuboring — men videoni yuklab yuboraman.")
+                 "🎵 Salom! Men sizga yordam bera olaman:\n\n"
+                 "🎶 Musiqa nomini yozing — men YouTube’dan topib video va mp3 yuboraman.\n"
+                 "🎬 Kino yoki multfilm nomini yozing — YouTube treylerini yuboraman.\n"
+                 "📎 Yoki YouTube, TikTok, Instagram link yuboring — videoni yuklab yuboraman.")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text = message.text.strip()
 
-    # link tekshirish
     if text.startswith("http://") or text.startswith("https://"):
         return download_video(message, text)
 
-    # nom bo‘yicha qidirish
-    search = VideosSearch(text, limit=1)
-    results = search.result()
+    # Agar foydalanuvchi faqat nom yozsa — YouTube’da qidiramiz
+    msg = bot.reply_to(message, f"🔍 \"{text}\" bo‘yicha qidirilmoqda...")
 
-    if not results or len(results['result']) == 0:
-        bot.reply_to(message, "❌ Hech narsa topilmadi. Iltimos, boshqa nom kiriting.")
-        return
+    try:
+        # YouTube'dan qidirish va yuklash
+        search_url = f"ytsearch1:{text}"
+        opts = {
+            'format': 'best',
+            'quiet': True,
+            'outtmpl': 'video.%(ext)s',
+        }
 
-    video = results['result'][0]
-    video_title = video['title']
-    video_url = video['link']
-    thumbnail = video['thumbnails'][0]['url']
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(search_url, download=True)
+            if 'entries' in info:
+                info = info['entries'][0]
+            video_file = ydl.prepare_filename(info)
+            title = info.get("title", "Noma'lum video")
 
-    caption = f"🎬 <b>{video_title}</b>\n🔗 {video_url}"
-    bot.send_photo(message.chat.id, thumbnail, caption=caption, parse_mode="HTML")
+        # Audio yuklash
+        audio_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'outtmpl': 'audio.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
 
-    # YouTube dan video va audio yuklash
-    download_video(message, video_url)
+        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+            ydl.extract_info(info['webpage_url'], download=True)
+
+        # Video yuborish
+        with open(video_file, 'rb') as vid:
+            bot.send_video(message.chat.id, vid, caption=f"🎬 {title}")
+
+        # Audio yuborish
+        for file in os.listdir():
+            if file.endswith(".mp3"):
+                with open(file, 'rb') as aud:
+                    bot.send_audio(message.chat.id, aud, caption=f"🎧 {title}")
+                os.remove(file)
+                break
+
+        # Fayllarni tozalash
+        if os.path.exists(video_file):
+            os.remove(video_file)
+
+        bot.delete_message(message.chat.id, msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ Xatolik: {e}", message.chat.id, msg.message_id)
 
 def download_video(message, url):
     msg = bot.reply_to(message, "⏳ Yuklab olinmoqda...")
 
     try:
-        video_opts = {
+        opts = {
             'format': 'best',
-            'outtmpl': 'video.%(ext)s',
             'quiet': True,
+            'outtmpl': 'video.%(ext)s',
         }
 
-        with yt_dlp.YoutubeDL(video_opts) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             video_file = ydl.prepare_filename(info)
             title = info.get("title", "Noma'lum video")
 
-        # audio yuklash
+        # Audio yuklash
         audio_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': 'audio.%(ext)s',
             'quiet': True,
+            'outtmpl': 'audio.%(ext)s',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -71,11 +105,9 @@ def download_video(message, url):
         with yt_dlp.YoutubeDL(audio_opts) as ydl:
             ydl.extract_info(url, download=True)
 
-        # video yuborish
         with open(video_file, 'rb') as vid:
             bot.send_video(message.chat.id, vid, caption=f"🎥 {title}")
 
-        # audio yuborish
         for file in os.listdir():
             if file.endswith(".mp3"):
                 with open(file, 'rb') as aud:
@@ -83,13 +115,12 @@ def download_video(message, url):
                 os.remove(file)
                 break
 
-        # fayllarni tozalash
         if os.path.exists(video_file):
             os.remove(video_file)
 
         bot.delete_message(message.chat.id, msg.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"❌ Xatolik: {str(e)}", message.chat.id, msg.message_id)
+        bot.edit_message_text(f"❌ Xatolik: {e}", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
