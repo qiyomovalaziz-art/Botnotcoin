@@ -60,8 +60,9 @@ async def start_handler(message: types.Message):
         await message.answer("⚠️ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=markup)
         return
 
+    # ✅ Ishonchli rasm URL ishlatiladi
     await message.answer_photo(
-        photo="https://i.ibb.co/GVHvJ3M/stars-banner.jpg",
+        photo="https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/640px-PNG_transparency_demonstration_1.png",
         caption="⭐️ Xush kelibsiz!\nBu bot orqali siz Telegram Stars, Premium, Emoji va Sticker xizmatlarini xarid qilishingiz mumkin!",
         reply_markup=main_menu
     )
@@ -176,7 +177,7 @@ async def process_buy(callback: types.CallbackQuery):
         title=title,
         description=f"{title} uchun to‘lov",
         provider_token=PAYMENT_PROVIDER_TOKEN,
-        currency="usd",
+        currency="USD",
         prices=prices,
         start_parameter="purchase",
         payload=f"service_{service}"
