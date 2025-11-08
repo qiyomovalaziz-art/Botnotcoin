@@ -1,126 +1,159 @@
-import telebot
 import os
-import yt_dlp
-from config import BOT_TOKEN
+import asyncio
+import tempfile
+import logging
+import requests
+from pathlib import Path
+from yt_dlp import YoutubeDL
+from telegram import Update
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-bot = telebot.TeleBot(BOT_TOKEN)
+# --- TOKEN va API sozlamalari ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Bot token
+TMDB_API_KEY = os.getenv("TMDB_API_KEY")      # ixtiyoriy, kino ma'lumotlari uchun
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message,
-                 "🎵 Salom! Men sizga yordam bera olaman:\n\n"
-                 "🎶 Musiqa nomini yozing — men YouTube’dan topib video va mp3 yuboraman.\n"
-                 "🎬 Kino yoki multfilm nomini yozing — YouTube treylerini yuboraman.\n"
-                 "📎 Yoki YouTube, TikTok, Instagram link yuboring — videoni yuklab yuboraman.")
+# --- Log sozlamalari (xatolarni ko‘rish uchun) ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    text = message.text.strip()
+# === 1️⃣ Kino ma'lumotini olish funksiyasi ===
+def search_movie_tmdb(query: str):
+    """
+    TMDb API orqali kino ma'lumotini olish.
+    """
+    if not TMDB_API_KEY:
+        return None
 
-    if text.startswith("http://") or text.startswith("https://"):
-        return download_video(message, text)
+    url = "https://api.themoviedb.org/3/search/movie"
+    params = {"api_key": TMDB_API_KEY, "query": query, "language": "en-US"}
+    r = requests.get(url, params=params, timeout=10)
+    if r.status_code != 200:
+        return None
 
-    # Agar foydalanuvchi faqat nom yozsa — YouTube’da qidiramiz
-    msg = bot.reply_to(message, f"🔍 \"{text}\" bo‘yicha qidirilmoqda...")
+    data = r.json()
+    if not data.get("results"):
+        return None
 
-    try:
-        # YouTube'dan qidirish va yuklash
-        search_url = f"ytsearch1:{text}"
-        opts = {
-            'format': 'best',
-            'quiet': True,
-            'outtmpl': 'video.%(ext)s',
-        }
+    top = data["results"][0]
+    return {
+        "title": top.get("title"),
+        "overview": top.get("overview"),
+        "year": top.get("release_date", "")[:4],
+        "rating": top.get("vote_average"),
+        "poster": f"https://image.tmdb.org/t/p/w500{top['poster_path']}" if top.get("poster_path") else None
+    }
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(search_url, download=True)
-            if 'entries' in info:
-                info = info['entries'][0]
-            video_file = ydl.prepare_filename(info)
-            title = info.get("title", "Noma'lum video")
+# === 2️⃣ Instagram video yuklash funksiyasi ===
+async def download_instagram(url: str, target_dir: Path):
+    """
+    Instagramdan video va audio yuklaydi.
+    """
+    video_path = target_dir / "insta_video.mp4"
+    audio_path = target_dir / "insta_audio.mp3"
 
-        # Audio yuklash
-        audio_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'outtmpl': 'audio.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
+    # Video yuklash
+    ydl_opts_video = {
+        "outtmpl": str(video_path),
+        "format": "best",
+        "quiet": True
+    }
+    # Audio yuklash
+    ydl_opts_audio = {
+        "outtmpl": str(audio_path),
+        "format": "bestaudio/best",
+        "quiet": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+    }
 
-        with yt_dlp.YoutubeDL(audio_opts) as ydl:
-            ydl.extract_info(info['webpage_url'], download=True)
+    loop = asyncio.get_event_loop()
 
-        # Video yuborish
-        with open(video_file, 'rb') as vid:
-            bot.send_video(message.chat.id, vid, caption=f"🎬 {title}")
+    # video yuklash
+    def run_video():
+        with YoutubeDL(ydl_opts_video) as ydl:
+            ydl.download([url])
 
-        # Audio yuborish
-        for file in os.listdir():
-            if file.endswith(".mp3"):
-                with open(file, 'rb') as aud:
-                    bot.send_audio(message.chat.id, aud, caption=f"🎧 {title}")
-                os.remove(file)
-                break
+    # audio yuklash
+    def run_audio():
+        with YoutubeDL(ydl_opts_audio) as ydl:
+            ydl.download([url])
 
-        # Fayllarni tozalash
-        if os.path.exists(video_file):
-            os.remove(video_file)
+    await loop.run_in_executor(None, run_video)
+    await loop.run_in_executor(None, run_audio)
 
-        bot.delete_message(message.chat.id, msg.message_id)
+    return video_path, audio_path
 
-    except Exception as e:
-        bot.edit_message_text(f"❌ Xatolik: {e}", message.chat.id, msg.message_id)
+# === 3️⃣ /start buyrug‘i ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Salom! 👋\n"
+        "Men sizga kinolar haqida ma'lumot topaman 🎬\n"
+        "va Instagram linkdan video + audio olib bera olaman.\n\n"
+        "Yozing:\n"
+        "🔹 Kino nomi → ma'lumot chiqadi\n"
+        "🔹 Instagram link → video va audio yuboraman."
+    )
 
-def download_video(message, url):
-    msg = bot.reply_to(message, "⏳ Yuklab olinmoqda...")
+# === 4️⃣ Asosiy xabarlarni qayta ishlash ===
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
 
-    try:
-        opts = {
-            'format': 'best',
-            'quiet': True,
-            'outtmpl': 'video.%(ext)s',
-        }
+    # Agar bu Instagram link bo‘lsa:
+    if "instagram.com" in text:
+        await update.message.reply_text("Instagram havolasi topildi. Yuklanmoqda...⏳")
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            video_file = ydl.prepare_filename(info)
-            title = info.get("title", "Noma'lum video")
+        tmpdir = Path(tempfile.mkdtemp())
+        try:
+            video_path, audio_path = await download_instagram(text, tmpdir)
 
-        # Audio yuklash
-        audio_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'outtmpl': 'audio.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
+            if video_path.exists():
+                await update.message.reply_video(video=open(video_path, "rb"))
+            if audio_path.exists():
+                await update.message.reply_audio(audio=open(audio_path, "rb"))
 
-        with yt_dlp.YoutubeDL(audio_opts) as ydl:
-            ydl.extract_info(url, download=True)
+        except Exception as e:
+            await update.message.reply_text(f"Xatolik yuz berdi: {e}")
+        finally:
+            for p in tmpdir.glob("*"):
+                p.unlink()
+            tmpdir.rmdir()
+        return
 
-        with open(video_file, 'rb') as vid:
-            bot.send_video(message.chat.id, vid, caption=f"🎥 {title}")
+    # Aks holda kino nomi deb qabul qilamiz
+    await update.message.reply_text(f"Qidirilmoqda: {text} 🎬")
+    info = search_movie_tmdb(text)
 
-        for file in os.listdir():
-            if file.endswith(".mp3"):
-                with open(file, 'rb') as aud:
-                    bot.send_audio(message.chat.id, aud, caption=f"🎧 {title}")
-                os.remove(file)
-                break
+    if not info:
+        await update.message.reply_text("Kino topilmadi yoki TMDB_API_KEY yo‘q 😕")
+        return
 
-        if os.path.exists(video_file):
-            os.remove(video_file)
+    caption = (
+        f"🎬 *{info['title']}* ({info['year']})\n"
+        f"⭐️ Reyting: {info['rating']}\n\n"
+        f"{info['overview']}"
+    )
 
-        bot.delete_message(message.chat.id, msg.message_id)
+    if info["poster"]:
+        await update.message.reply_photo(photo=info["poster"], caption=caption, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(caption, parse_mode="Markdown")
 
-    except Exception as e:
-        bot.edit_message_text(f"❌ Xatolik: {e}", message.chat.id, msg.message_id)
+# === 5️⃣ Botni ishga tushirish ===
+def main():
+    if not TELEGRAM_TOKEN:
+        print("❌ TELEGRAM_TOKEN topilmadi. Iltimos .env faylga qo‘shing.")
+        return
 
-bot.polling(non_stop=True)
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("✅ Bot ishga tushdi...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
