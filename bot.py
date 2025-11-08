@@ -1,12 +1,13 @@
 import asyncio
 import json
+from pathlib import Path
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 )
-from pathlib import Path
+from aiogram.exceptions import TelegramNetworkError
 
 # ⚙️ Sozlamalar
 BOT_TOKEN = "8395937326:AAHdugyvBwwTkoM5sFsK3Gu3WrV30TPTSTc"
@@ -14,9 +15,11 @@ ADMIN_ID = 7973934849
 PAYMENT_PROVIDER_TOKEN = "YOUR_PAYMENT_PROVIDER_TOKEN"  # @BotFather dan olingan token
 BOT_USERNAME = "StarstUZBbot"
 
-bot = Bot(token=BOT_TOKEN)
+# ✅ Timeout qo‘shildi
+bot = Bot(token=BOT_TOKEN, parse_mode="HTML", timeout=60)
 dp = Dispatcher()
 
+# 📂 Ma'lumotlar papkasi
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 CHANNEL_FILE = DATA_DIR / "channels.json"
@@ -38,6 +41,14 @@ main_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# 🔹 Retry bilan xatolarga qarshi yuborish
+async def safe_send(func, *args, **kwargs):
+    for _ in range(3):  # 3 marta urinish
+        try:
+            return await func(*args, **kwargs)
+        except TelegramNetworkError:
+            await asyncio.sleep(5)
+
 # 🔹 Start komandasi
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
@@ -57,11 +68,11 @@ async def start_handler(message: types.Message):
         for ch in not_subscribed:
             markup.add(InlineKeyboardButton(text=f"📢 {ch}", url=f"https://t.me/{ch.replace('@','')}"))
         markup.add(InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_subs"))
-        await message.answer("⚠️ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=markup)
+        await safe_send(message.answer, "⚠️ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=markup)
         return
 
-    # ✅ Ishonchli rasm URL ishlatiladi
-    await message.answer_photo(
+    await safe_send(
+        message.answer_photo,
         photo="https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/640px-PNG_transparency_demonstration_1.png",
         caption="⭐️ Xush kelibsiz!\nBu bot orqali siz Telegram Stars, Premium, Emoji va Sticker xizmatlarini xarid qilishingiz mumkin!",
         reply_markup=main_menu
@@ -82,8 +93,8 @@ async def check_subs(callback: types.CallbackQuery):
             pass
 
     if not not_subscribed:
-        await callback.message.edit_text("✅ Obuna tekshirildi. Endi botdan foydalanishingiz mumkin.")
-        await callback.message.answer("Asosiy menyu:", reply_markup=main_menu)
+        await safe_send(callback.message.edit_text, "✅ Obuna tekshirildi. Endi botdan foydalanishingiz mumkin.")
+        await safe_send(callback.message.answer, "Asosiy menyu:", reply_markup=main_menu)
     else:
         await callback.answer("❌ Hali barcha kanallarga obuna bo‘lmagansiz.", show_alert=True)
 
@@ -91,32 +102,32 @@ async def check_subs(callback: types.CallbackQuery):
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        return await message.answer("⛔ Siz admin emassiz.")
+        return await safe_send(message.answer, "⛔ Siz admin emassiz.")
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kanal qo‘shish", callback_data="add_channel")],
         [InlineKeyboardButton(text="➖ Kanal o‘chirish", callback_data="del_channel")],
         [InlineKeyboardButton(text="📋 Kanal ro‘yxati", callback_data="list_channels")]
     ])
-    await message.answer("🛠 Admin panel", reply_markup=markup)
+    await safe_send(message.answer, "🛠 Admin panel", reply_markup=markup)
 
 @dp.callback_query(F.data == "add_channel")
 async def add_channel(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    await callback.message.answer("📨 Kanal username kiriting (@ bilan):")
+    await safe_send(callback.message.answer, "📨 Kanal username kiriting (@ bilan):")
     dp.message.register(wait_channel_name)
 
 async def wait_channel_name(message: types.Message):
     ch = message.text.strip()
     if not ch.startswith("@"):
-        return await message.answer("❌ Kanal nomi '@' bilan boshlansin.")
+        return await safe_send(message.answer, "❌ Kanal nomi '@' bilan boshlansin.")
     channels = load_channels()
     if ch not in channels:
         channels.append(ch)
         save_channels(channels)
-        await message.answer(f"✅ {ch} qo‘shildi.")
+        await safe_send(message.answer, f"✅ {ch} qo‘shildi.")
     else:
-        await message.answer("⚠️ Bu kanal allaqachon mavjud.")
+        await safe_send(message.answer, "⚠️ Bu kanal allaqachon mavjud.")
     dp.message.unregister(wait_channel_name)
 
 @dp.callback_query(F.data == "del_channel")
@@ -125,11 +136,11 @@ async def del_channel(callback: types.CallbackQuery):
         return
     channels = load_channels()
     if not channels:
-        return await callback.message.answer("📭 Kanal ro‘yxati bo‘sh.")
+        return await safe_send(callback.message.answer, "📭 Kanal ro‘yxati bo‘sh.")
     markup = InlineKeyboardMarkup()
     for ch in channels:
         markup.add(InlineKeyboardButton(text=f"❌ {ch}", callback_data=f"rem_{ch}"))
-    await callback.message.answer("O‘chiriladigan kanalni tanlang:", reply_markup=markup)
+    await safe_send(callback.message.answer, "O‘chiriladigan kanalni tanlang:", reply_markup=markup)
 
 @dp.callback_query(F.data.startswith("rem_"))
 async def rem_channel(callback: types.CallbackQuery):
@@ -140,7 +151,7 @@ async def rem_channel(callback: types.CallbackQuery):
     if ch in channels:
         channels.remove(ch)
         save_channels(channels)
-        await callback.message.answer(f"✅ {ch} o‘chirildi.")
+        await safe_send(callback.message.answer, f"✅ {ch} o‘chirildi.")
 
 @dp.callback_query(F.data == "list_channels")
 async def list_channels(callback: types.CallbackQuery):
@@ -148,11 +159,11 @@ async def list_channels(callback: types.CallbackQuery):
         return
     channels = load_channels()
     if not channels:
-        await callback.message.answer("📭 Hozircha kanal yo‘q.")
+        await safe_send(callback.message.answer, "📭 Hozircha kanal yo‘q.")
     else:
-        await callback.message.answer("📋 Kanal ro‘yxati:\n" + "\n".join(channels))
+        await safe_send(callback.message.answer, "📋 Kanal ro‘yxati:\n" + "\n".join(channels))
 
-# 🔹 Xizmatlar (to‘lov tizimi)
+# 🔹 Xarid qilish
 @dp.message(F.text == "🛒 Xarid qilish")
 async def buy_menu(message: types.Message):
     markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -160,7 +171,7 @@ async def buy_menu(message: types.Message):
         [InlineKeyboardButton(text="💎 Telegram Premium - 4$", callback_data="buy_premium")],
         [InlineKeyboardButton(text="😂 Emoji Pack - 2$", callback_data="buy_emoji")]
     ])
-    await message.answer("🛍 Xizmat tanlang:", reply_markup=markup)
+    await safe_send(message.answer, "🛍 Xizmat tanlang:", reply_markup=markup)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
@@ -172,7 +183,8 @@ async def process_buy(callback: types.CallbackQuery):
     }
     title, price_cents = titles.get(service, ("Xizmat", 100))
     prices = [LabeledPrice(label=title, amount=price_cents * 100)]
-    await bot.send_invoice(
+    await safe_send(
+        bot.send_invoice,
         chat_id=callback.from_user.id,
         title=title,
         description=f"{title} uchun to‘lov",
@@ -185,26 +197,29 @@ async def process_buy(callback: types.CallbackQuery):
 
 @dp.pre_checkout_query(lambda q: True)
 async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    await safe_send(bot.answer_pre_checkout_query, pre_checkout_query.id, ok=True)
 
 @dp.message(F.successful_payment)
 async def successful_payment(message: types.Message):
     service = message.successful_payment.invoice_payload.replace("service_", "")
-    await message.answer(f"✅ {service.title()} muvaffaqiyatli xarid qilindi!\nAdmin sizga tez orada xizmatni yetkazadi.")
-    await bot.send_message(ADMIN_ID, f"💰 Foydalanuvchi @{message.from_user.username} {service} uchun to‘lov qildi.")
+    await safe_send(message.answer, f"✅ {service.title()} muvaffaqiyatli xarid qilindi!\nAdmin sizga tez orada xizmatni yetkazadi.")
+    await safe_send(bot.send_message, ADMIN_ID, f"💰 Foydalanuvchi @{message.from_user.username} {service} uchun to‘lov qildi.")
 
+# 🔹 Hisobim
 @dp.message(F.text == "💼 Hisobim")
 async def account(message: types.Message):
-    await message.answer("💼 Sizning hisobingiz: 0 yulduz.\nBalansni to‘ldirish uchun to‘lovni amalga oshiring.")
+    await safe_send(message.answer, "💼 Sizning hisobingiz: 0 yulduz.\nBalansni to‘ldirish uchun to‘lovni amalga oshiring.")
 
+# 🔹 Hamkorlik
 @dp.message(F.text == "🤝 Hamkorlik dasturi")
 async def partner(message: types.Message):
     ref_link = f"https://t.me/{BOT_USERNAME}?start={message.from_user.id}"
-    await message.answer(f"🤝 Hamkorlik dasturi:\nDo‘stlaringizni taklif qiling!\nSizning referal linkingiz:\n{ref_link}")
+    await safe_send(message.answer, f"🤝 Hamkorlik dasturi:\nDo‘stlaringizni taklif qiling!\nSizning referal linkingiz:\n{ref_link}")
 
+# 🔹 Yo‘riqnoma
 @dp.message(F.text == "📘 Yo‘riqnoma")
 async def help_info(message: types.Message):
-    await message.answer("📘 Yo‘riqnoma:\n1️⃣ Xizmat tanlang\n2️⃣ To‘lovni amalga oshiring\n3️⃣ Xizmatni oling ✅")
+    await safe_send(message.answer, "📘 Yo‘riqnoma:\n1️⃣ Xizmat tanlang\n2️⃣ To‘lovni amalga oshiring\n3️⃣ Xizmatni oling ✅")
 
 # 🚀 Ishga tushirish
 async def main():
