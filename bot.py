@@ -1,230 +1,94 @@
-import asyncio
-import json
-from pathlib import Path
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import Command
-from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
-)
-from aiogram.exceptions import TelegramNetworkError
+import os
+import yt_dlp
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram import ChatAction
+import requests
 
-# ⚙️ Sozlamalar
-BOT_TOKEN = "8395937326:AAHdugyvBwwTkoM5sFsK3Gu3WrV30TPTSTc"
-ADMIN_ID = 7973934849
-PAYMENT_PROVIDER_TOKEN = "YOUR_PAYMENT_PROVIDER_TOKEN"  # @BotFather dan olingan token
-BOT_USERNAME = "StarstUZBbot"
+# --- CONFIG ---
+BOT_TOKEN = "8053267322:AAHp65zXTZn_ZQswyLyjIc5e7bZnxogx9wM"
 
-# ✅ Timeout qo‘shildi
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML", timeout=60)
-dp = Dispatcher()
-
-# 📂 Ma'lumotlar papkasi
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-CHANNEL_FILE = DATA_DIR / "channels.json"
-
-def load_channels():
-    if CHANNEL_FILE.exists():
-        return json.loads(CHANNEL_FILE.read_text())
-    return []
-
-def save_channels(channels):
-    CHANNEL_FILE.write_text(json.dumps(channels, indent=2))
-
-# 🔘 Asosiy menyu
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🛒 Xarid qilish"), KeyboardButton(text="💼 Hisobim")],
-        [KeyboardButton(text="🤝 Hamkorlik dasturi"), KeyboardButton(text="📘 Yo‘riqnoma")]
-    ],
-    resize_keyboard=True
-)
-
-# 🔹 Retry bilan xatolarga qarshi yuborish
-async def safe_send(func, *args, **kwargs):
-    for _ in range(3):  # 3 marta urinish
-        try:
-            return await func(*args, **kwargs)
-        except TelegramNetworkError:
-            await asyncio.sleep(5)
-
-# 🔹 Start komandasi
-@dp.message(Command("start"))
-async def start_handler(message: types.Message):
-    user_id = message.from_user.id
-    channels = load_channels()
-    not_subscribed = []
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in ("left", "kicked"):
-                not_subscribed.append(ch)
-        except:
-            pass
-
-    if not_subscribed:
-        markup = InlineKeyboardMarkup()
-        for ch in not_subscribed:
-            markup.add(InlineKeyboardButton(text=f"📢 {ch}", url=f"https://t.me/{ch.replace('@','')}"))
-        markup.add(InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_subs"))
-        await safe_send(message.answer, "⚠️ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=markup)
-        return
-
-    await safe_send(
-        message.answer_photo,
-        photo="https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/640px-PNG_transparency_demonstration_1.png",
-        caption="⭐️ Xush kelibsiz!\nBu bot orqali siz Telegram Stars, Premium, Emoji va Sticker xizmatlarini xarid qilishingiz mumkin!",
-        reply_markup=main_menu
-    )
-
-# 🔹 Obuna tekshirish
-@dp.callback_query(F.data == "check_subs")
-async def check_subs(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    channels = load_channels()
-    not_subscribed = []
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in ("left", "kicked"):
-                not_subscribed.append(ch)
-        except:
-            pass
-
-    if not not_subscribed:
-        await safe_send(callback.message.edit_text, "✅ Obuna tekshirildi. Endi botdan foydalanishingiz mumkin.")
-        await safe_send(callback.message.answer, "Asosiy menyu:", reply_markup=main_menu)
-    else:
-        await callback.answer("❌ Hali barcha kanallarga obuna bo‘lmagansiz.", show_alert=True)
-
-# 🔹 Admin panel
-@dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return await safe_send(message.answer, "⛔ Siz admin emassiz.")
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Kanal qo‘shish", callback_data="add_channel")],
-        [InlineKeyboardButton(text="➖ Kanal o‘chirish", callback_data="del_channel")],
-        [InlineKeyboardButton(text="📋 Kanal ro‘yxati", callback_data="list_channels")]
-    ])
-    await safe_send(message.answer, "🛠 Admin panel", reply_markup=markup)
-
-@dp.callback_query(F.data == "add_channel")
-async def add_channel(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return
-    await safe_send(callback.message.answer, "📨 Kanal username kiriting (@ bilan):")
-    dp.message.register(wait_channel_name)
-
-async def wait_channel_name(message: types.Message):
-    ch = message.text.strip()
-    if not ch.startswith("@"):
-        return await safe_send(message.answer, "❌ Kanal nomi '@' bilan boshlansin.")
-    channels = load_channels()
-    if ch not in channels:
-        channels.append(ch)
-        save_channels(channels)
-        await safe_send(message.answer, f"✅ {ch} qo‘shildi.")
-    else:
-        await safe_send(message.answer, "⚠️ Bu kanal allaqachon mavjud.")
-    dp.message.unregister(wait_channel_name)
-
-@dp.callback_query(F.data == "del_channel")
-async def del_channel(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return
-    channels = load_channels()
-    if not channels:
-        return await safe_send(callback.message.answer, "📭 Kanal ro‘yxati bo‘sh.")
-    markup = InlineKeyboardMarkup()
-    for ch in channels:
-        markup.add(InlineKeyboardButton(text=f"❌ {ch}", callback_data=f"rem_{ch}"))
-    await safe_send(callback.message.answer, "O‘chiriladigan kanalni tanlang:", reply_markup=markup)
-
-@dp.callback_query(F.data.startswith("rem_"))
-async def rem_channel(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return
-    ch = callback.data.replace("rem_", "")
-    channels = load_channels()
-    if ch in channels:
-        channels.remove(ch)
-        save_channels(channels)
-        await safe_send(callback.message.answer, f"✅ {ch} o‘chirildi.")
-
-@dp.callback_query(F.data == "list_channels")
-async def list_channels(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return
-    channels = load_channels()
-    if not channels:
-        await safe_send(callback.message.answer, "📭 Hozircha kanal yo‘q.")
-    else:
-        await safe_send(callback.message.answer, "📋 Kanal ro‘yxati:\n" + "\n".join(channels))
-
-# 🔹 Xarid qilish
-@dp.message(F.text == "🛒 Xarid qilish")
-async def buy_menu(message: types.Message):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Telegram Stars - 5$", callback_data="buy_stars")],
-        [InlineKeyboardButton(text="💎 Telegram Premium - 4$", callback_data="buy_premium")],
-        [InlineKeyboardButton(text="😂 Emoji Pack - 2$", callback_data="buy_emoji")]
-    ])
-    await safe_send(message.answer, "🛍 Xizmat tanlang:", reply_markup=markup)
-
-@dp.callback_query(F.data.startswith("buy_"))
-async def process_buy(callback: types.CallbackQuery):
-    service = callback.data.replace("buy_", "")
-    titles = {
-        "stars": ("Telegram Stars", 500),
-        "premium": ("Telegram Premium", 400),
-        "emoji": ("Emoji Pack", 200)
+# --- VIDEO YUKLASH FUNKSIYASI ---
+def download_video(url):
+    ydl_opts = {
+        'outtmpl': 'video.%(ext)s',
+        'format': 'bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4'
     }
-    title, price_cents = titles.get(service, ("Xizmat", 100))
-    prices = [LabeledPrice(label=title, amount=price_cents * 100)]
-    await safe_send(
-        bot.send_invoice,
-        chat_id=callback.from_user.id,
-        title=title,
-        description=f"{title} uchun to‘lov",
-        provider_token=PAYMENT_PROVIDER_TOKEN,
-        currency="USD",
-        prices=prices,
-        start_parameter="purchase",
-        payload=f"service_{service}"
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    for f in os.listdir():
+        if f.startswith("video.") and f.endswith(".mp4"):
+            return f
+    return None
+
+# --- AUDIO YUKLASH FUNKSIYASI (nom bilan qidirish) ---
+def download_music(query):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'music.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([f"ytsearch1:{query}"])
+    for f in os.listdir():
+        if f.startswith("music.") and f.endswith(".mp3"):
+            return f
+    return None
+
+# --- VIDEO yoki MUSIQA SO‘ROVNI ANIQLASH ---
+def handle_message(update, context):
+    text = update.message.text.strip()
+    chat_id = update.message.chat_id
+    context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+    if any(x in text for x in ["instagram.com", "tiktok.com", "youtube.com", "youtu.be"]):
+        update.message.reply_text("⏳ Video yuklanmoqda, biroz kuting...")
+        try:
+            filename = download_video(text)
+            if filename:
+                with open(filename, 'rb') as video:
+                    context.bot.send_video(chat_id=chat_id, video=video, caption="🎬 Siz so‘ragan video tayyor!")
+                os.remove(filename)
+            else:
+                update.message.reply_text("❌ Video yuklab bo‘lmadi.")
+        except Exception as e:
+            update.message.reply_text(f"Xatolik: {e}")
+    else:
+        update.message.reply_text("🎵 Musiqa izlanmoqda, kuting...")
+        try:
+            filename = download_music(text)
+            if filename:
+                with open(filename, 'rb') as audio:
+                    context.bot.send_audio(chat_id=chat_id, audio=audio, caption=f"🎶 {text}")
+                os.remove(filename)
+            else:
+                update.message.reply_text("❌ Musiqa topilmadi.")
+        except Exception as e:
+            update.message.reply_text(f"Xatolik: {e}")
+
+# --- START KOMANDASI ---
+def start(update, context):
+    update.message.reply_text(
+        "👋 Salom! Menga Instagram, YouTube yoki TikTok link tashlang — men sizga videoni yuboraman.\n\n"
+        "Yoki shunchaki musiqa nomini yozing 🎵 — men sizga musiqani topib beraman."
     )
 
-@dp.pre_checkout_query(lambda q: True)
-async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    await safe_send(bot.answer_pre_checkout_query, pre_checkout_query.id, ok=True)
+# --- BOTNI ISHGA TUSHURISH ---
+def main():
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-@dp.message(F.successful_payment)
-async def successful_payment(message: types.Message):
-    service = message.successful_payment.invoice_payload.replace("service_", "")
-    await safe_send(message.answer, f"✅ {service.title()} muvaffaqiyatli xarid qilindi!\nAdmin sizga tez orada xizmatni yetkazadi.")
-    await safe_send(bot.send_message, ADMIN_ID, f"💰 Foydalanuvchi @{message.from_user.username} {service} uchun to‘lov qildi.")
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-# 🔹 Hisobim
-@dp.message(F.text == "💼 Hisobim")
-async def account(message: types.Message):
-    await safe_send(message.answer, "💼 Sizning hisobingiz: 0 yulduz.\nBalansni to‘ldirish uchun to‘lovni amalga oshiring.")
+    updater.start_polling()
+    updater.idle()
 
-# 🔹 Hamkorlik
-@dp.message(F.text == "🤝 Hamkorlik dasturi")
-async def partner(message: types.Message):
-    ref_link = f"https://t.me/{BOT_USERNAME}?start={message.from_user.id}"
-    await safe_send(message.answer, f"🤝 Hamkorlik dasturi:\nDo‘stlaringizni taklif qiling!\nSizning referal linkingiz:\n{ref_link}")
-
-# 🔹 Yo‘riqnoma
-@dp.message(F.text == "📘 Yo‘riqnoma")
-async def help_info(message: types.Message):
-    await safe_send(message.answer, "📘 Yo‘riqnoma:\n1️⃣ Xizmat tanlang\n2️⃣ To‘lovni amalga oshiring\n3️⃣ Xizmatni oling ✅")
-
-# 🚀 Ishga tushirish
-async def main():
-    print("🚀 Bot ishga tushdi")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == '__main__':
+    main()
