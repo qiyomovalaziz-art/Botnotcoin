@@ -3,10 +3,10 @@ import yt_dlp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = "8347087773:AAFuMVzJIdPxg-iujpOXLw_Zb-CnBG5PcTw"  # bu yerga bot tokeningizni yozing
+TOKEN = "8347087773:AAFuMVzJIdPxg-iujpOXLw_Zb-CnBG5PcTw"  # bu joyga bot tokeningizni yozing
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salom! Menga Instagram, TikTok yoki YouTube link yuboring 🎥")
+    await update.message.reply_text("Salom! Menga Instagram yoki TikTok link yuboring 🎥")
 
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
