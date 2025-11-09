@@ -20,32 +20,55 @@ def start(message):
 def downloader(message):
     query = message.text.strip()
 
-    # Agar foydalanuvchi link yuborsa
     if any(x in query for x in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com"]):
         bot.reply_to(message, "📥 Yuklanmoqda, biroz kuting...")
-        download_video(query, message)
+        download_video_and_audio(query, message)
     else:
         bot.reply_to(message, f"🔎 Qidirilmoqda: {query}")
         search_and_download(query, message)
 
-def download_video(url, message):
-    ydl_opts = {
+def download_video_and_audio(url, message):
+    video_opts = {
         'outtmpl': '%(title)s.%(ext)s',
-        'cookiefile': 'cookies.txt',  # cookie faylni shu joyga qo'yasiz
+        'cookiefile': 'cookies.txt',  # ixtiyoriy
         'format': 'best',
         'noplaylist': True,
         'quiet': True
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
+    audio_opts = {
+        'outtmpl': '%(title)s.%(ext)s',
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
 
-        with open(filename, 'rb') as video:
+    try:
+        # VIDEO yuklash
+        with yt_dlp.YoutubeDL(video_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            video_file = ydl.prepare_filename(info)
+
+        with open(video_file, 'rb') as video:
             bot.send_video(message.chat.id, video, caption=f"🎬 {info.get('title', 'Video')}")
 
-        os.remove(filename)
+        os.remove(video_file)
+
+        # AUDIO (mp3) yuklash
+        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            audio_file = ydl.prepare_filename(info).rsplit('.', 1)[0] + ".mp3"
+
+        with open(audio_file, 'rb') as audio:
+            bot.send_audio(message.chat.id, audio, caption=f"🎧 {info.get('title', 'Audio')}")
+
+        os.remove(audio_file)
+
     except Exception as e:
         bot.reply_to(message, f"❌ Xatolik: {e}")
 
@@ -54,7 +77,7 @@ def search_and_download(query, message):
         videosSearch = VideosSearch(query, limit=1)
         result = videosSearch.result()["result"][0]
         url = result["link"]
-        download_video(url, message)
+        download_video_and_audio(url, message)
     except Exception as e:
         bot.reply_to(message, f"❌ Qidirishda xato: {e}")
 
